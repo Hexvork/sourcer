@@ -258,14 +258,13 @@ body {
 .settings-header h2 { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
 .settings-header p { color: var(--muted-foreground); font-size: 13px; margin-bottom: 18px; }
 .settings-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start;
+  display: block;
 }
-@media (max-width: 900px) { .settings-grid { grid-template-columns: 1fr; } }
 .settings-card {
   background: #ffffff; border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: var(--shadow-xs); padding: 18px; margin-bottom: 0;
+  box-shadow: var(--shadow-xs); padding: 18px; margin-bottom: 16px;
 }
-.settings-card.full { grid-column: 1 / -1; }
+.settings-card.full { margin-bottom: 0; }
 .settings-card-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
 .text-input, .text-area {
   width: 100%; border: 1px solid var(--input); border-radius: 6px; padding: 8px 10px;

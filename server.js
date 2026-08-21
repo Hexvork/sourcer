@@ -48,13 +48,15 @@ async function processQueue(files, force) {
   lastScan.total = files.length;
   lastScan.done = 0;
   lastScan.errors = 0;
+  lastScan.skipped = 0;
   lastScan.time = now();
   try {
     for (const f of files) {
       try {
         const r = await pool.processFile(f, { force });
         if (r.ok) lastScan.done++;
-        else if (!r.skipped) lastScan.errors++;
+        else if (r.skipped) lastScan.skipped++;
+        else lastScan.errors++;
       } catch (e) {
         lastScan.errors++;
         console.error('[scan]', f, e.message);
@@ -282,7 +284,18 @@ app.post('/api/scan', async (req, res) => {
     .filter(f => !f.startsWith('~$') && !f.startsWith('.'))
     .filter(f => parse.SUPPORTED.includes(parse.extOf(f)))
     .map(f => path.join(pool.RESUME_DIR, f));
-  res.json({ ok: true, queued: files.length });
+  let pending = 0;
+  let already = 0;
+  for (const f of files) {
+    const abs = path.resolve(f);
+    const prev = db.getProcessedFile(abs);
+    let isDone = false;
+    if (prev && prev.status === 'done') {
+      try { isDone = prev.hash === pool.fileHash(abs); } catch (e) { isDone = false; }
+    }
+    if (isDone) already++; else pending++;
+  }
+  res.json({ ok: true, total: files.length, pending, already_processed: already, queued: pending });
   processQueue(files, force);
 });
 

@@ -220,7 +220,7 @@ async function refreshState() {
       `${ic('plug')} 可用 API ${s.apis} 个`
     ];
     if (s.lastScan && s.lastScan.time) {
-      parts.push(`${ic('rotate')} 上次扫描：${s.lastScan.time}（成功 ${s.lastScan.done}/${s.lastScan.total}${s.lastScan.errors ? '，失败 ' + s.lastScan.errors : ''}）`);
+      parts.push(`${ic('rotate')} 上次扫描：${s.lastScan.time}（处理 ${s.lastScan.done}，跳过 ${s.lastScan.skipped || 0}/${s.lastScan.total}${s.lastScan.errors ? '，失败 ' + s.lastScan.errors : ''}）`);
     }
     if (s.lastScan && s.lastScan.running) parts.push(`${ic('spinner', 'fa-spin')} 后台扫描中…`);
     $('#statusBar').innerHTML = parts.map(p => `<span>${p}</span>`).join('');
@@ -313,7 +313,13 @@ async function doScan() {
   btn.innerHTML = `${ic('spinner', 'fa-spin')} 扫描中…`;
   try {
     const r = await api('/api/scan', { method: 'POST', body: { force: false } });
-    toast(`已提交扫描任务：${r.queued} 份待处理文件`, 'ok');
+    if (r.pending > 0) {
+      toast(`简历文件夹共 ${r.total} 份文件，其中 ${r.pending} 份需要处理，${r.already_processed} 份已处理过`, 'ok');
+    } else if (r.total > 0) {
+      toast(`简历文件夹共 ${r.total} 份文件，都已处理过，无需重复处理`, 'ok');
+    } else {
+      toast('简历文件夹里没有找到 PDF/Word/TXT 文件', 'error');
+    }
     setTimeout(refreshState, 1200);
   } catch (e) {
     toast(esc(e.message), 'error');
