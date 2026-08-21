@@ -8,7 +8,15 @@
 
 ## 一、新环境要装什么？
 
-**只需要安装 Node.js（≥ 22 版本）。** 不需要 Python，不需要数据库软件（SQLite 是 Node 内置的），不需要额外下载 WPS（系统装了 WPS 就会自动用它打开文件）。
+**必须先安装 Node.js（≥ 22 版本），然后再执行 `npm install`。**
+
+> ⚠️ 重点：
+> - `npm` 是 Node.js 自带的一个命令，**不装 Node.js 就没有 npm**。
+> - 直接执行 `npm install` 会报错：`'npm' 不是内部或外部命令` / `command not found`。
+> - **`npm install` 不会帮你安装 Node.js**，它只是安装项目依赖。
+> - 所以新环境的顺序是：**先装 Node.js → 再 `npm install` → 再 `npm start`**。
+
+不需要 Python，不需要数据库软件（SQLite 是 Node 内置的），不需要额外下载 WPS（系统装了 WPS 就会自动用它打开文件）。
 
 ### 安装 Node.js
 
@@ -53,6 +61,13 @@ cd sourcer
 ---
 
 ## 三、安装依赖并启动
+
+> 前提：已经装好 Node.js（上一节）。先确认一下：
+> ```bash
+> node -v
+> npm -v
+> ```
+> 两条命令都能输出版本号，才继续往下。
 
 进入项目目录后，安装依赖：
 
