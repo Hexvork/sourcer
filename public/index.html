@@ -50,22 +50,26 @@
     <section id="page-match" class="page">
       <div class="match-header">
         <h2><i class="fas fa-code-compare"></i> 简历匹配度</h2>
-        <p>把两份简历分别拖进下面两个框，AI 会给出它们的匹配度。支持 PDF / Word / TXT。</p>
+        <p>一份候选人的简历，和一份岗位要求做精细 1v1 匹配。支持 PDF / Word / TXT。</p>
       </div>
       <div class="match-drop-row">
         <div class="drop-zone" id="dropA">
-          <div class="drop-icon"><i class="fas fa-file-arrow-up"></i></div>
-          <div class="drop-text">拖入 <b>简历 A</b> 或点击选择</div>
+          <div class="drop-icon"><i class="fas fa-user-tie"></i></div>
+          <div class="drop-text">拖入 <b>候选人简历</b> 或点击选择</div>
           <div class="drop-file" id="fileA"></div>
           <input type="file" id="inputA" accept=".pdf,.doc,.docx,.txt,.wps" hidden>
         </div>
         <div class="vs">VS</div>
         <div class="drop-zone" id="dropB">
-          <div class="drop-icon"><i class="fas fa-file-arrow-up"></i></div>
-          <div class="drop-text">拖入 <b>简历 B</b> 或点击选择</div>
+          <div class="drop-icon"><i class="fas fa-briefcase"></i></div>
+          <div class="drop-text">拖入 <b>岗位要求文件</b> 或点击选择</div>
           <div class="drop-file" id="fileB"></div>
           <input type="file" id="inputB" accept=".pdf,.doc,.docx,.txt,.wps" hidden>
         </div>
+      </div>
+      <div class="match-textarea">
+        <label class="search-label">或者直接粘贴岗位要求（可多行）</label>
+        <textarea id="requirementText" class="text-area" rows="4" placeholder="例如：&#10;要求熟悉大模型微调和 RAG；&#10;有机器人运动控制经验，熟悉 ROS 和 C++"></textarea>
       </div>
       <div class="match-actions">
         <button class="btn btn-primary" id="btnMatch"><i class="fas fa-magnifying-glass"></i> 开始匹配</button>
@@ -77,14 +81,15 @@
           <h3 id="matchSummary"></h3>
           <div class="match-cols">
             <div>
-              <h4><i class="fas fa-circle-check" style="color:var(--green)"></i> 共同点</h4>
+              <h4><i class="fas fa-circle-check" style="color:var(--green)"></i> 相同点 / 契合点</h4>
               <ul id="matchOverlap" class="match-list"></ul>
             </div>
             <div>
-              <h4><i class="fas fa-triangle-exclamation" style="color:var(--yellow)"></i> 差异点</h4>
+              <h4><i class="fas fa-triangle-exclamation" style="color:var(--yellow)"></i> 不同点 / 差距</h4>
               <ul id="matchGap" class="match-list"></ul>
             </div>
           </div>
+          <div class="match-suggestion" id="matchSuggestion"></div>
         </div>
       </div>
     </section>

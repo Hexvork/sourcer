@@ -174,45 +174,54 @@ function ringClass(score) {
   return 'yellow';
 }
 
-// ---------------- 两份简历对比 ----------------
+// ---------------- 简历 ↔ 岗位要求 1v1 精细匹配 ----------------
 app.post('/api/match-resumes', async (req, res) => {
   const A = req.body.fileA || {};
   const B = req.body.fileB || {};
-  if (!A.data || !B.data) return res.status(400).json({ error: '请拖入两份简历文件' });
+  const reqText = String(req.body.requirementText || '').trim();
+  if (!A.data) return res.status(400).json({ error: '请先放入候选人的简历文件' });
+  if (!B.data && !reqText) return res.status(400).json({ error: '请放入岗位要求文件，或直接粘贴岗位要求文字' });
 
   let textA, textB;
+  let nameA = A.name || '候选人简历';
+  let nameB = B.name || '岗位要求';
   try {
-    textA = await parse.parseBuffer(Buffer.from(A.data, 'base64'), A.name || 'A.pdf');
-    textB = await parse.parseBuffer(Buffer.from(B.data, 'base64'), B.name || 'B.pdf');
+    textA = await parse.parseBuffer(Buffer.from(A.data, 'base64'), A.name || 'resume.pdf');
+    if (B.data) {
+      textB = await parse.parseBuffer(Buffer.from(B.data, 'base64'), B.name || 'jd.pdf');
+      nameB = B.name || '岗位要求文件';
+    } else {
+      textB = reqText;
+      nameB = '粘贴的岗位要求';
+    }
   } catch (e) {
     return res.status(400).json({ error: '文件解析失败：' + e.message });
   }
 
-  const nameA = A.name || '简历A';
-  const nameB = B.name || '简历B';
   let out;
   let engine = 'ai';
   try {
-    out = await llm.matchTwoResumes(textA, nameA, textB, nameB, db.getUserProfile());
+    out = await llm.matchResumeToRequirement(textA, nameA, textB, nameB, db.getUserProfile());
   } catch (e) {
     engine = 'fallback';
-    const kw = llm.keywordMatch(textA, textB);
+    const kw = llm.keywordMatch(textB, textA);
     const score = kw.score;
     out = {
       score,
-      summary: score >= 70 ? '两份简历关键词重合度较高（规则粗筛）。' : '两份简历关键词重合度一般（规则粗筛）。',
-      overlap: kw.hits.slice(0, 8),
-      gap: ['规则模式暂无法输出差异点，请配置模型获得详细对比'],
+      summary: score >= 70 ? '简历与岗位要求关键词重合度较高（规则粗筛）。' : '简历与岗位要求关键词重合度一般（规则粗筛）。',
+      overlap: kw.hits.slice(0, 8).map(h => `命中关键词：${h}`),
+      gap: ['规则模式暂无法输出详细差异，请配置模型获得精细分析'],
+      suggestion: '配置模型后可获得针对性改进建议',
       usedApi: null,
       model: null
     };
   }
 
   const convId = db.createConversation(`${nameA} ↔ ${nameB} 匹配度`, 'match');
-  db.addMessage(convId, 'user', `对比简历：${nameA} 与 ${nameB}`, '');
-  db.addMessage(convId, 'assistant', `匹配度 ${out.score}%。${out.summary}`, JSON.stringify({ score: out.score, summary: out.summary, overlap: out.overlap, gap: out.gap }));
+  db.addMessage(convId, 'user', `简历「${nameA}」与岗位要求「${nameB}」匹配分析`, '');
+  db.addMessage(convId, 'assistant', `匹配度 ${out.score}%。${out.summary}`, JSON.stringify({ score: out.score, summary: out.summary, overlap: out.overlap, gap: out.gap, suggestion: out.suggestion }));
 
-  res.json({ score: out.score, summary: out.summary, overlap: out.overlap, gap: out.gap, engine, usedApi: out.apiName ? `${out.apiName} / ${out.model}` : null, names: [nameA, nameB] });
+  res.json({ score: out.score, summary: out.summary, overlap: out.overlap, gap: out.gap, suggestion: out.suggestion, engine, usedApi: out.apiName ? `${out.apiName} / ${out.model}` : null, names: [nameA, nameB] });
 });
 
 // ---------------- 打开文件（默认程序 / WPS） ----------------

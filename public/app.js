@@ -360,16 +360,24 @@ function readBase64(file) {
 }
 
 async function doMatch() {
-  if (!files.A || !files.B) { toast('请先把两份简历都拖进来', 'error'); return; }
+  if (!files.A) { toast('请先放入候选人的简历文件', 'error'); return; }
+  const reqText = $('#requirementText').value.trim();
+  if (!files.B && !reqText) { toast('请放入岗位要求文件，或粘贴岗位要求文字', 'error'); return; }
   const btn = $('#btnMatch');
   btn.disabled = true;
   btn.innerHTML = `${ic('spinner', 'fa-spin')} 匹配中…`;
-  $('#matchStatus').textContent = '正在解析并对比两份简历…';
+  $('#matchStatus').textContent = '正在解析并做精细匹配分析…';
   try {
-    const [dataA, dataB] = await Promise.all([readBase64(files.A), readBase64(files.B)]);
+    const dataA = await readBase64(files.A);
+    let dataB = null;
+    if (files.B) dataB = await readBase64(files.B);
     const data = await api('/api/match-resumes', {
       method: 'POST',
-      body: { fileA: { name: files.A.name, data: dataA }, fileB: { name: files.B.name, data: dataB } }
+      body: {
+        fileA: { name: files.A.name, data: dataA },
+        fileB: dataB ? { name: files.B.name, data: dataB } : null,
+        requirementText: reqText || undefined
+      }
     });
     renderMatchResult(data);
     $('#matchStatus').innerHTML = data.engine === 'fallback'
@@ -392,6 +400,8 @@ function renderMatchResult(data) {
   $('#matchSummary').textContent = data.summary || '';
   $('#matchOverlap').innerHTML = (data.overlap || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>无</li>';
   $('#matchGap').innerHTML = (data.gap || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>无</li>';
+  const sug = data.suggestion || '';
+  $('#matchSuggestion').innerHTML = sug ? `<b>${ic('lightbulb')} 建议：</b>${esc(sug)}` : '';
   $('#matchResult').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
