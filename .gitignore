@@ -1,0 +1,19 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# 运行时数据 / 隐私简历
+data/
+简历/
+简历池/
+
+# 旧版 Python 备份
+_旧Python版本备份/
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/

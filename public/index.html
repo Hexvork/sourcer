@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>猎头简历搜寻系统</title>
+  <link rel="stylesheet" href="https://cdn.jsdmirror.com/npm/@fortawesome/fontawesome-free@6.1/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 页眉 Header -->
+  <header class="topbar">
+    <div class="header-left">
+      <button class="brand-btn" data-page="search"><i class="fas fa-magnifying-glass"></i> 简历搜寻</button>
+      <span class="sub-brand">AI 猎头助理</span>
+    </div>
+    <div class="header-right">
+      <button class="nav-btn active" data-page="search"><i class="fas fa-magnifying-glass"></i> 简历搜寻</button>
+      <button class="nav-btn" data-page="match"><i class="fas fa-code-compare"></i> 简历匹配度</button>
+      <button class="nav-btn" data-page="history"><i class="fas fa-clock-rotate-left"></i> 历史</button>
+      <button class="nav-btn" data-page="settings"><i class="fas fa-gear"></i> 设置</button>
+    </div>
+  </header>
+
+  <!-- 主内容 -->
+  <main class="main">
+    <!-- 简历搜寻页 -->
+    <section id="page-search" class="page active">
+      <div class="search-panel">
+        <label class="search-label">输入你要搜寻的岗位（可多个，用换行或「；」分隔）</label>
+        <textarea id="searchInput" class="search-input" rows="3" placeholder="例如：&#10;AI 算法工程师，要求熟悉大模型微调和 RAG；&#10;机器人运动控制工程师，熟悉 ROS 和 C++"></textarea>
+        <div class="search-bar">
+          <select id="modelSelect" class="model-select" title="选择使用哪个模型">
+            <option value="">自动（优先级最高的可用模型）</option>
+          </select>
+          <button class="btn btn-primary" id="btnSearch"><i class="fas fa-wand-magic-sparkles"></i> 开始匹配</button>
+          <button class="btn btn-outline" id="btnScan"><i class="fas fa-rotate"></i> 立即扫描简历</button>
+        </div>
+        <div class="status-bar" id="statusBar">
+          <span>简历池加载中…</span>
+        </div>
+        <div class="search-hint" id="searchHint"></div>
+      </div>
+      <div id="resultsArea">
+        <div class="empty-tip"><i class="fas fa-hand-pointer"></i> 输入岗位需求，AI 会从简历池中找出匹配度 ≥ 70% 的简历</div>
+      </div>
+    </section>
+
+    <!-- 简历匹配度页 -->
+    <section id="page-match" class="page">
+      <div class="match-header">
+        <h2><i class="fas fa-code-compare"></i> 简历匹配度</h2>
+        <p>把两份简历分别拖进下面两个框，AI 会给出它们的匹配度。支持 PDF / Word / TXT。</p>
+      </div>
+      <div class="match-drop-row">
+        <div class="drop-zone" id="dropA">
+          <div class="drop-icon"><i class="fas fa-file-arrow-up"></i></div>
+          <div class="drop-text">拖入 <b>简历 A</b> 或点击选择</div>
+          <div class="drop-file" id="fileA"></div>
+          <input type="file" id="inputA" accept=".pdf,.doc,.docx,.txt,.wps" hidden>
+        </div>
+        <div class="vs">VS</div>
+        <div class="drop-zone" id="dropB">
+          <div class="drop-icon"><i class="fas fa-file-arrow-up"></i></div>
+          <div class="drop-text">拖入 <b>简历 B</b> 或点击选择</div>
+          <div class="drop-file" id="fileB"></div>
+          <input type="file" id="inputB" accept=".pdf,.doc,.docx,.txt,.wps" hidden>
+        </div>
+      </div>
+      <div class="match-actions">
+        <button class="btn btn-primary" id="btnMatch"><i class="fas fa-magnifying-glass"></i> 开始匹配</button>
+        <span class="status-bar" id="matchStatus"></span>
+      </div>
+      <div id="matchResult" class="match-result hidden">
+        <div class="match-score-box" id="matchScoreBox"></div>
+        <div class="match-detail">
+          <h3 id="matchSummary"></h3>
+          <div class="match-cols">
+            <div>
+              <h4><i class="fas fa-circle-check" style="color:var(--green)"></i> 共同点</h4>
+              <ul id="matchOverlap" class="match-list"></ul>
+            </div>
+            <div>
+              <h4><i class="fas fa-triangle-exclamation" style="color:var(--yellow)"></i> 差异点</h4>
+              <ul id="matchGap" class="match-list"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 历史页 -->
+    <section id="page-history" class="page">
+      <div class="history-header">
+        <h2><i class="fas fa-clock-rotate-left"></i> 历史记录</h2>
+        <span class="sub-brand">你和 AI 的所有对话，以及它帮你找到的资料</span>
+      </div>
+      <div id="historyList" class="history-list"></div>
+      <div id="historyDetail" class="history-detail hidden"></div>
+    </section>
+
+    <!-- 设置页 -->
+    <section id="page-settings" class="page">
+      <div class="settings-header">
+        <h2><i class="fas fa-gear"></i> 设置</h2>
+        <p>这些信息会插入到每一次 AI 对话中：顶部是用户名称，接着是回答偏好，后面是模型 API 配置。</p>
+      </div>
+
+      <div class="settings-grid">
+        <div class="settings-card">
+          <div class="settings-card-title"><i class="fas fa-user"></i> 用户信息</div>
+          <div class="api-row">
+            <label>你的称呼（会作为「用户名称」插入每次对话）</label>
+            <input type="text" id="userName" class="text-input" placeholder="例如：王猎头 / Kelly">
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title"><i class="fas fa-comment-dots"></i> 想让 AI 怎么回答</div>
+          <div class="api-row">
+            <label>回答偏好（会作为「用户偏好」插入每次对话）</label>
+            <textarea id="userPreference" class="text-area" rows="4" placeholder="例如：回答用中文，简洁直接；重点说明候选人与岗位的差距；只推荐真正合适的人；不要客套话。"></textarea>
+          </div>
+        </div>
+
+        <div class="settings-card full">
+          <div class="settings-card-title"><i class="fas fa-plug"></i> 模型 API 配置</div>
+          <div class="sidebar-tip">
+            配置一个或多个 API（OpenAI 兼容）。调用失败会按优先级自动切换下一个；拖动卡片可调整优先级。1 个 API Key 可配置多个模型；多模态勾选 = 支持图片，不勾 = 仅文本。
+          </div>
+          <div id="apiList" class="api-list"></div>
+          <button class="btn btn-outline" id="btnAddApi"><i class="fas fa-plus"></i> 添加 API</button>
+          <button class="btn btn-primary" id="btnSaveSettings"><i class="fas fa-floppy-disk"></i> 保存全部设置</button>
+          <div class="sidebar-status" id="settingsStatus"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

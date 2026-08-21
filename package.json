@@ -1,0 +1,19 @@
+{
+  "name": "resume-hunter",
+  "version": "1.0.0",
+  "description": "猎头简历搜寻系统：HTML 前端 + Node.js + SQLite + Markdown 简历池，无 Python",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "express": "^4.21.2",
+    "mammoth": "^1.9.0",
+    "pdf-parse": "^1.1.1",
+    "word-extractor": "^1.0.4"
+  }
+}
