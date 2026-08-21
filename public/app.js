@@ -277,12 +277,14 @@ function renderResults(data) {
           <div class="badge-row">
             ${genderBadge}
             <span class="badge">${ic('cake-candles')} ${esc(r.age || '未知')}</span>
+            <span class="badge">${ic('book-open')} ${esc(r.education || '学历未知')}</span>
             <span class="badge cat">${ic('tag')} ${esc(r.category || '未分类')}</span>
           </div>
         </div>
       </div>
       <div class="meta">
-        <div>${ic('briefcase')} ${esc(r.occupation || '职业未知')}</div>
+        <div>${ic('briefcase')} ${esc(r.occupation || '职务未知')}</div>
+        <div>${ic('building')} ${esc(r.company || '主要任职公司未知')}</div>
         <div>${ic('graduation-cap')} ${esc(r.university || '大学未知')}</div>
         <div class="file-path">${ic('folder-open')} ${esc(path)}</div>
       </div>

@@ -142,7 +142,9 @@ app.post('/api/search', async (req, res) => {
         name: row.name,
         gender: row.gender,
         age: row.age,
+        education: row.education,
         occupation: row.occupation,
+        company: row.company,
         university: row.university,
         category: row.category,
         pool_path: row.pool_path,
@@ -152,7 +154,7 @@ app.post('/api/search', async (req, res) => {
         ring: ringClass(r.score)
       };
     }
-    return { ...r, id: null, gender: '未知', age: '未知', occupation: '', university: '', pool_path: '', original_path: '', ring: ringClass(r.score) };
+    return { ...r, id: null, gender: '未知', age: '未知', education: '', occupation: '', company: '', university: '', pool_path: '', original_path: '', ring: ringClass(r.score) };
   }).filter(r => r.score >= 70).sort((a, b) => b.score - a.score);
 
   // 保存历史
