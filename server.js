@@ -492,18 +492,23 @@ function planResumeQueue(files) {
     // 历史垃圾名/未知占位：DB 里的岗位/姓名是“期望工作性质：…”这种垃圾，
     // 或任一字段是"未知"，即使 needs_ai 可能不是 1，也要交给 AI 重新抽取补全
     if (!pool.entryNameable(row) || pool.hasUnreliableFields(row)) {
-      // 兜底：原文件名残留【】等格式垃圾时，先清理格式（不依赖 AI）
-      try {
-        const r = pool.renameResumeFile(abs, row, { resumeId: row.id });
-        if (r) {
-          console.log('[rename] 格式兜底', r.oldPath, '→', r.newPath);
-          if (hasApi) { renameQueued++; toProcess.push(r.newPath); } else { already++; }
-          continue;
+      if (hasApi) {
+        // 有 AI：直接交给 AI 重新抽取，AI 会同时修正姓名/岗位并清掉【】括号
+        renameQueued++; toProcess.push(abs);
+      } else {
+        // 无 AI：只做格式兜底清理（去【】），等以后配了 AI 再补全
+        try {
+          const r = pool.renameResumeFile(abs, row, { resumeId: row.id });
+          if (r) {
+            console.log('[rename] 格式兜底', r.oldPath, '→', r.newPath);
+            already++;
+            continue;
+          }
+        } catch (e) {
+          console.error('[rename] 格式兜底失败:', abs, e.message);
         }
-      } catch (e) {
-        console.error('[rename] 格式兜底失败:', abs, e.message);
+        already++;
       }
-      if (hasApi) { renameQueued++; toProcess.push(abs); } else { already++; }
     } else if (pool.needsRename(abs, row)) {
       try {
         const r = pool.renameResumeFile(abs, row, { resumeId: row.id });
