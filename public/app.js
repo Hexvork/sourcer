@@ -159,6 +159,9 @@ async function loadSettings() {
     apis = data.apis || [];
     $('#userName').value = data.user_name || '';
     $('#userPreference').value = data.preference || '';
+    const app = data.app || {};
+    // 多 Agent 协同设置
+    if ($('#multiAgentPoolToggle')) $('#multiAgentPoolToggle').checked = app.multiAgentPool === '1';
   } catch (e) {
     apis = [];
   }
@@ -179,7 +182,15 @@ async function saveSettings() {
   try {
     await api('/api/settings', {
       method: 'PUT',
-      body: { user_name: $('#userName').value.trim(), preference: $('#userPreference').value.trim(), apis }
+      body: {
+        user_name: $('#userName').value.trim(),
+        preference: $('#userPreference').value.trim(),
+        apis,
+        app: {
+          multiAgentSearch: $('#multiAgentToggle') ? $('#multiAgentToggle').checked : false,
+          multiAgentPool: $('#multiAgentPoolToggle') ? $('#multiAgentPoolToggle').checked : true
+        }
+      }
     });
     $('#settingsStatus').innerHTML = `${ic('circle-check')} 已保存用户信息、回答偏好和 ${apis.length} 个 API`;
     toast(ic('circle-check') + ' 配置已保存', 'ok');
@@ -276,7 +287,8 @@ function renderResults(data) {
           <div class="name">${esc(r.name)}</div>
           <div class="badge-row">
             ${genderBadge}
-            <span class="badge">${ic('cake-candles')} ${esc(r.age || '未知')}</span>
+            <span class="badge">${ic('calendar-days')} 出生 ${esc(r.birth_date || '未知')}</span>
+            <span class="badge">${ic('cake-candles')} ${esc(r.age ? r.age + '岁' : '年龄未知')}</span>
             <span class="badge">${ic('book-open')} ${esc(r.education || '学历未知')}</span>
             <span class="badge cat">${ic('tag')} ${esc(r.category || '未分类')}</span>
           </div>

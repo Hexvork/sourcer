@@ -33,6 +33,10 @@
           <select id="modelSelect" class="model-select" title="选择使用哪个模型">
             <option value="">自动（优先级最高的可用模型）</option>
           </select>
+          <label class="ma-toggle" title="开启后，多个 Agent 并发搜寻简历，主 Agent 核查汇总">
+            <input type="checkbox" id="multiAgentToggle">
+            <i class="fas fa-users-gear"></i> 多 Agent 协同
+          </label>
           <button class="btn btn-primary" id="btnSearch"><i class="fas fa-wand-magic-sparkles"></i> 开始匹配</button>
           <button class="btn btn-outline" id="btnScan"><i class="fas fa-rotate"></i> 立即扫描简历</button>
         </div>
@@ -137,6 +141,20 @@
           <button class="btn btn-outline" id="btnAddApi"><i class="fas fa-plus"></i> 添加 API</button>
           <button class="btn btn-primary" id="btnSaveSettings"><i class="fas fa-floppy-disk"></i> 保存全部设置</button>
           <div class="sidebar-status" id="settingsStatus"></div>
+        </div>
+
+        <div class="settings-card full">
+          <div class="settings-card-title"><i class="fas fa-robot"></i> 多 Agent 协同设置</div>
+          <div class="sidebar-tip">
+            多 Agent 并发机制：开启后，简历处理/搜索时由多个 Agent 并发工作，最后由主 Agent 核查汇总。
+          </div>
+          <div class="api-row">
+            <label class="toggle-row">
+              <input type="checkbox" id="multiAgentPoolToggle">
+              <span><i class="fas fa-layer-group"></i> 简历池多 Agent 并发总结</span>
+              <span class="toggle-hint">开启后，每份简历由独立 Agent 并行处理，加快处理速度</span>
+            </label>
+          </div>
         </div>
       </div>
     </section>

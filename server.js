@@ -41,7 +41,7 @@ function now() {
   return new Date().toLocaleString('zh-CN', { hour12: false });
 }
 
-async function processQueue(files, force) {
+async function processQueue(files, force, multiAgent) {
   if (processing) return;
   processing = true;
   lastScan.running = true;
@@ -50,16 +50,35 @@ async function processQueue(files, force) {
   lastScan.errors = 0;
   lastScan.skipped = 0;
   lastScan.time = now();
+  lastScan.multiAgent = !!multiAgent;
   try {
-    for (const f of files) {
-      try {
-        const r = await pool.processFile(f, { force });
+    if (multiAgent) {
+      // 多 Agent 并发模式：每个文件由一个 Agent 处理，并发运行
+      const promises = files.map(async (f) => {
+        try {
+          const r = await pool.processFile(f, { force, multiAgent: true });
+          return r;
+        } catch (e) {
+          return { ok: false, error: e.message };
+        }
+      });
+      const results = await Promise.all(promises);
+      for (const r of results) {
         if (r.ok) lastScan.done++;
         else if (r.skipped) lastScan.skipped++;
         else lastScan.errors++;
-      } catch (e) {
-        lastScan.errors++;
-        console.error('[scan]', f, e.message);
+      }
+    } else {
+      for (const f of files) {
+        try {
+          const r = await pool.processFile(f, { force, multiAgent: false });
+          if (r.ok) lastScan.done++;
+          else if (r.skipped) lastScan.skipped++;
+          else lastScan.errors++;
+        } catch (e) {
+          lastScan.errors++;
+          console.error('[scan]', f, e.message);
+        }
       }
     }
   } finally {
@@ -95,6 +114,7 @@ app.post('/api/search', async (req, res) => {
   if (!query) return res.status(400).json({ error: '请输入岗位需求' });
   const apiId = req.body.apiId || null;
   const modelName = req.body.modelName || null;
+  const multiAgent = !!req.body.multiAgent;
 
   let results = [];
   let engine = 'ai';
@@ -108,9 +128,12 @@ app.post('/api/search', async (req, res) => {
 
   try {
     const profile = db.getUserProfile();
-    const r = await llm.searchResumes(query, markdown, profile);
+    const r = multiAgent
+      ? await llm.searchResumesMultiAgent(query, markdown, profile)
+      : await llm.searchResumes(query, markdown, profile);
     results = r.results;
     usedApi = r.apiName + ' / ' + r.model;
+    if (multiAgent) usedApi = '多 Agent 协同：' + usedApi;
   } catch (e) {
     if (e.message === 'NO_API') {
       engine = 'fallback';
@@ -144,6 +167,7 @@ app.post('/api/search', async (req, res) => {
         name: row.name,
         gender: row.gender,
         age: row.age,
+        birth_date: row.birth_date,
         education: row.education,
         occupation: row.occupation,
         company: row.company,
@@ -156,7 +180,7 @@ app.post('/api/search', async (req, res) => {
         ring: ringClass(r.score)
       };
     }
-    return { ...r, id: null, gender: '未知', age: '未知', education: '', occupation: '', company: '', university: '', pool_path: '', original_path: '', ring: ringClass(r.score) };
+    return { ...r, id: null, gender: '未知', age: '未知', birth_date: '', education: '', occupation: '', company: '', university: '', pool_path: '', original_path: '', ring: ringClass(r.score) };
   }).filter(r => r.score >= 70).sort((a, b) => b.score - a.score);
 
   // 保存历史
@@ -272,15 +296,36 @@ app.delete('/api/history/:id', (req, res) => {
 // ---------------- 设置 ----------------
 app.get('/api/settings', (req, res) => {
   const profile = db.getUserProfile();
-  res.json({ user_name: profile.user_name, preference: profile.preference, apis: db.listAPIs() });
+  res.json({
+    user_name: profile.user_name,
+    preference: profile.preference,
+    apis: db.listAPIs(),
+    app: {
+      multiAgentSearch: db.getAppSetting('multiAgentSearch', '0'),
+      multiAgentPool: db.getAppSetting('multiAgentPool', '1')
+    }
+  });
 });
 
 app.put('/api/settings', (req, res) => {
   try {
     db.saveUserProfile(req.body.user_name || '', req.body.preference || '');
     db.saveAPIs(req.body.apis || []);
+    if (req.body.app) {
+      if (req.body.app.multiAgentSearch != null) db.setAppSetting('multiAgentSearch', req.body.app.multiAgentSearch ? '1' : '0');
+      if (req.body.app.multiAgentPool != null) db.setAppSetting('multiAgentPool', req.body.app.multiAgentPool ? '1' : '0');
+    }
     const profile = db.getUserProfile();
-    res.json({ ok: true, user_name: profile.user_name, preference: profile.preference, apis: db.listAPIs() });
+    res.json({
+      ok: true,
+      user_name: profile.user_name,
+      preference: profile.preference,
+      apis: db.listAPIs(),
+      app: {
+        multiAgentSearch: db.getAppSetting('multiAgentSearch', '0'),
+        multiAgentPool: db.getAppSetting('multiAgentPool', '1')
+      }
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -289,6 +334,7 @@ app.put('/api/settings', (req, res) => {
 // ---------------- 手动扫描 ----------------
 app.post('/api/scan', async (req, res) => {
   const force = !!req.body.force;
+  const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
   const files = fs.readdirSync(pool.RESUME_DIR)
     .filter(f => !f.startsWith('~$') && !f.startsWith('.'))
     .filter(f => parse.SUPPORTED.includes(parse.extOf(f)))
@@ -304,8 +350,8 @@ app.post('/api/scan', async (req, res) => {
     }
     if (isDone) already++; else pending++;
   }
-  res.json({ ok: true, total: files.length, pending, already_processed: already, queued: pending });
-  processQueue(files, force);
+  res.json({ ok: true, total: files.length, pending, already_processed: already, queued: pending, multiAgent });
+  processQueue(files, force, multiAgent);
 });
 
 // ---------------- 启动 ----------------
@@ -326,7 +372,9 @@ app.listen(PORT, () => {
     .map(f => path.join(pool.RESUME_DIR, f));
   if (initialFiles.length) {
     console.log('[启动扫描] 发现', initialFiles.length, '份待处理文件');
-    processQueue(initialFiles, false);
+    const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
+    if (multiAgent) console.log('[启动扫描] 多 Agent 并发模式已开启');
+    processQueue(initialFiles, false, multiAgent);
   }
 });
 
@@ -339,13 +387,15 @@ const watcher = chokidar.watch(pool.RESUME_DIR, {
 watcher.on('add', (p) => {
   if (parse.SUPPORTED.includes(parse.extOf(p))) {
     console.log('[watch] 新文件:', p);
-    processQueue([p], false);
+    const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
+    processQueue([p], false, multiAgent);
   }
 });
 watcher.on('change', (p) => {
   if (parse.SUPPORTED.includes(parse.extOf(p))) {
     console.log('[watch] 文件变化:', p);
-    processQueue([p], true);
+    const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
+    processQueue([p], true, multiAgent);
   }
 });
 watcher.on('error', (e) => console.error('[watch]', e.message));
