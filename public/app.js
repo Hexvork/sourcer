@@ -160,7 +160,10 @@ async function loadSettings() {
     $('#userName').value = data.user_name || '';
     $('#userPreference').value = data.preference || '';
     const app = data.app || {};
-    // 多 Agent 协同设置
+    // 多 Agent 协同设置（搜寻默认真并发，已改为全简历并行、无串行等待）
+    const searchMulti = app.multiAgentSearch !== '0'; // 默认开启
+    if ($('#multiAgentSearchToggle')) $('#multiAgentSearchToggle').checked = searchMulti;
+    if ($('#multiAgentToggle')) $('#multiAgentToggle').checked = searchMulti;
     if ($('#multiAgentPoolToggle')) $('#multiAgentPoolToggle').checked = app.multiAgentPool === '1';
   } catch (e) {
     apis = [];
@@ -187,7 +190,7 @@ async function saveSettings() {
         preference: $('#userPreference').value.trim(),
         apis,
         app: {
-          multiAgentSearch: $('#multiAgentToggle') ? $('#multiAgentToggle').checked : false,
+          multiAgentSearch: $('#multiAgentSearchToggle') ? $('#multiAgentSearchToggle').checked : true,
           multiAgentPool: $('#multiAgentPoolToggle') ? $('#multiAgentPoolToggle').checked : true
         }
       }
@@ -253,7 +256,8 @@ async function doSearch() {
   btn.innerHTML = `${ic('spinner', 'fa-spin')} 匹配中…`;
   $('#searchHint').textContent = '';
   try {
-    const data = await api('/api/search', { method: 'POST', body: { query, apiId, modelName } });
+    const multiAgent = $('#multiAgentToggle') ? $('#multiAgentToggle').checked : false;
+    const data = await api('/api/search', { method: 'POST', body: { query, apiId, modelName, multiAgent } });
     renderResults(data);
     if (data.engine === 'fallback') $('#searchHint').innerHTML = `${ic('triangle-exclamation')} ${esc(data.error || '关键词粗筛模式')}`;
     else $('#searchHint').innerHTML = `${ic('circle-check')} AI 引擎：${esc(data.usedApi || '')}`;
@@ -372,25 +376,55 @@ function readBase64(file) {
 }
 
 async function doMatch() {
-  if (!files.A) { toast('请先放入候选人的简历文件', 'error'); return; }
+  const resumeText = $('#resumeText').value.trim();
+  const hasResumeFile = !!files.A;
+  const hasResumeText = !!resumeText;
+  if (!hasResumeFile && !hasResumeText) { toast('请上传候选人简历，或粘贴简历原文', 'error'); return; }
   const reqText = $('#requirementText').value.trim();
-  if (!files.B && !reqText) { toast('请放入岗位要求文件，或粘贴岗位要求文字', 'error'); return; }
+  const hasReqFile = !!files.B;
+  const hasReqText = !!reqText;
+  if (!hasReqFile && !hasReqText) { toast('请放入岗位要求文件，或粘贴岗位要求文字', 'error'); return; }
+  // 简历来源命名
+  const resumeName = hasResumeFile ? files.A.name : '粘贴的简历原文';
   const btn = $('#btnMatch');
   btn.disabled = true;
   btn.innerHTML = `${ic('spinner', 'fa-spin')} 匹配中…`;
   $('#matchStatus').textContent = '正在解析并做精细匹配分析…';
+  const runId = 'm' + Date.now() + Math.floor(Math.random() * 1000);
+  let pollTimer = null;
+  // 实时进度轮询
+  const poll = async () => {
+    try {
+      const p = await api('/api/match-progress/' + runId);
+      if (p && p.step) $('#matchStatus').textContent = p.step + '…';
+      if (p.done) { clearInterval(pollTimer); return; }
+    } catch (e) { /* 进度接口尚未就绪则忽略 */ }
+  };
+  poll();
+  pollTimer = setInterval(poll, 700);
+  const timeoutMs = 240000; // 4 分钟强制超时，避免一直“匹配中”
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const dataA = await readBase64(files.A);
-    let dataB = null;
-    if (files.B) dataB = await readBase64(files.B);
-    const data = await api('/api/match-resumes', {
-      method: 'POST',
-      body: {
-        fileA: { name: files.A.name, data: dataA },
-        fileB: dataB ? { name: files.B.name, data: dataB } : null,
-        requirementText: reqText || undefined
-      }
-    });
+    const dataA = files.A ? await readBase64(files.A) : null;
+    const dataB = files.B ? await readBase64(files.B) : null;
+    const multiAgentMatch = $('#multiAgentMatchToggle') ? $('#multiAgentMatchToggle').checked : false;
+    const body = {
+      fileA: dataA ? { name: files.A.name, data: dataA } : null,
+      resumeText: resumeText || undefined,
+      nameA: resumeName,
+      fileB: dataB ? { name: files.B.name, data: dataB } : null,
+      requirementText: reqText || undefined,
+      multiAgent: multiAgentMatch,
+      runId
+    };
+    const fetchBody = { method: 'POST', body, signal: ctrl.signal };
+    try {
+      var data = await api('/api/match-resumes', fetchBody);
+    } catch (err) {
+      if (err.name === 'AbortError') throw new Error('匹配超时（超过 4 分钟）。请检查模型 API 是否可用，或切换单 Agent 模式');
+      throw err;
+    }
     renderMatchResult(data);
     $('#matchStatus').innerHTML = data.engine === 'fallback'
       ? `${ic('triangle-exclamation')} 关键词粗筛模式`
@@ -399,6 +433,8 @@ async function doMatch() {
     toast('匹配失败：' + esc(e.message), 'error');
     $('#matchStatus').innerHTML = `${ic('circle-xmark')} ${esc(e.message)}`;
   } finally {
+    clearTimeout(timer);
+    clearInterval(pollTimer);
     btn.disabled = false;
     btn.innerHTML = `${ic('magnifying-glass')} 开始匹配`;
   }

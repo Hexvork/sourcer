@@ -19,3 +19,6 @@ Thumbs.db
 .idea/
 
 测试
+
+# WorkBuddy 会话数据
+.workbuddy/

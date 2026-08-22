@@ -34,7 +34,7 @@
             <option value="">自动（优先级最高的可用模型）</option>
           </select>
           <label class="ma-toggle" title="开启后，多个 Agent 并发搜寻简历，主 Agent 核查汇总">
-            <input type="checkbox" id="multiAgentToggle">
+            <input type="checkbox" id="multiAgentToggle" checked>
             <i class="fas fa-users-gear"></i> 多 Agent 协同
           </label>
           <button class="btn btn-primary" id="btnSearch"><i class="fas fa-wand-magic-sparkles"></i> 开始匹配</button>
@@ -72,10 +72,18 @@
         </div>
       </div>
       <div class="match-textarea">
-        <label class="search-label">或者直接粘贴岗位要求（可多行）</label>
+        <label class="search-label">或直接粘贴 <b>候选人简历</b> 原文（可多行）</label>
+        <textarea id="resumeText" class="text-area" rows="4" placeholder="例如：&#10;张三，男，28岁，本科，浙江大学计算机专业……"></textarea>
+      </div>
+      <div class="match-textarea">
+        <label class="search-label">或直接粘贴 <b>岗位要求</b>（可多行）</label>
         <textarea id="requirementText" class="text-area" rows="4" placeholder="例如：&#10;要求熟悉大模型微调和 RAG；&#10;有机器人运动控制经验，熟悉 ROS 和 C++"></textarea>
       </div>
       <div class="match-actions">
+        <label class="ma-toggle" title="开启后，多个子 Agent 从不同维度并发评审，再由主 Agent 复核汇总">
+          <input type="checkbox" id="multiAgentMatchToggle" checked>
+          <i class="fas fa-users-gear"></i> 多 Agent 协同
+        </label>
         <button class="btn btn-primary" id="btnMatch"><i class="fas fa-magnifying-glass"></i> 开始匹配</button>
         <span class="status-bar" id="matchStatus"></span>
       </div>
@@ -147,6 +155,13 @@
           <div class="settings-card-title"><i class="fas fa-robot"></i> 多 Agent 协同设置</div>
           <div class="sidebar-tip">
             多 Agent 并发机制：开启后，简历处理/搜索时由多个 Agent 并发工作，最后由主 Agent 核查汇总。
+          </div>
+          <div class="api-row">
+            <label class="toggle-row">
+              <input type="checkbox" id="multiAgentSearchToggle" checked>
+              <span><i class="fas fa-users-gear"></i> 简历匹配度多 Agent 协同</span>
+              <span class="toggle-hint">开启后，搜索匹配时由多个子 Agent 并发评估，再交给主 Agent 核查汇总</span>
+            </label>
           </div>
           <div class="api-row">
             <label class="toggle-row">

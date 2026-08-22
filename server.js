@@ -20,6 +20,8 @@ app.use(express.static(path.join(ROOT, 'public')));
 
 pool.ensureDirs();
 db.initDB();
+// 启动时对账一次：清理数据库中原始文件已不存在的记录，保证状态栏数量实时、准确
+try { pool.reconcileDeleted(); } catch (e) { console.error('[reconcile@boot]', e.message); }
 
 // ---------------- 工具函数 ----------------
 let processing = false;
@@ -137,12 +139,49 @@ app.post('/api/search', async (req, res) => {
 
   try {
     const profile = db.getUserProfile();
-    const r = multiAgent
-      ? await llm.searchResumesMultiAgent(query, markdown, profile)
-      : await llm.searchResumes(query, markdown, profile);
+    let r;
+    if (multiAgent) {
+      // 多 Agent 协同：简历库小时（<=12 人）全员进短名单；大库时先用本地关键词毫秒级粗筛 Top 12。
+      // 短名单条目用 pool.buildEntryBlock 生成——与简历池 md 完全一致的完整结构化信息（学历/经历/技能等），
+      // 交给子 Agent 分批并发评估 + 主 Agent 核查。调用次数 = 批数 + 1（8 人约 3 次），速度快且结果完整。
+      const all = db.listResumes();
+      let picked;
+      if (all.length <= 12) {
+        picked = all.map(x => ({ row: x, score: 0, hits: [] }));
+      } else {
+        const kw = all.map(x => {
+          const m = llm.keywordMatch(query, (x.content || '') + '\n' + x.summary + '\n' + x.occupation + '\n' + x.experience);
+          return { row: x, score: m.score, hits: m.hits };
+        }).sort((a, b) => b.score - a.score);
+        picked = kw.filter(x => x.score > 0).slice(0, 12);
+        if (picked.length === 0) picked = kw.slice(0, 12);
+      }
+      if (picked.length > 0) {
+        // 精简条目：与简历池 md 同源的字段，但去掉「文件路径」等对匹配无用的长文本，减少 token、加快响应
+        const shortlistMd = picked.map(x => {
+          const r = x.row;
+          return [
+            `## ${r.name}（${r.gender}，${r.age}）`,
+            `- 职务：${r.occupation || '未提取'}`,
+            `- 学历：${r.education || '未提取'}`,
+            `- 主要任职公司：${r.company || '未提取'}`,
+            `- 经历：${r.experience || '未提取'}`,
+            `- 大学：${r.university || '未提取'}`,
+            `- 其他重要信息：${r.other || '无'}`,
+            `- 简述：${r.summary || ''}`
+          ].join('\n');
+        }).join('\n\n');
+        r = await llm.searchResumesShortlistMultiAgent(query, shortlistMd, profile);
+        r.shortlistCount = picked.length;
+      } else {
+        r = await llm.searchResumesMultiAgent(query, markdown, profile);
+      }
+    } else {
+      r = await llm.searchResumes(query, markdown, profile);
+    }
     results = r.results;
     usedApi = r.apiName + ' / ' + r.model;
-    if (multiAgent) usedApi = '多 Agent 协同：' + usedApi;
+    if (multiAgent) usedApi = '多 Agent 协同（' + (r.shortlistCount || '') + '人分批→主Agent核查）：' + usedApi;
   } catch (e) {
     if (e.message === 'NO_API') {
       engine = 'fallback';
@@ -165,6 +204,26 @@ app.post('/api/search', async (req, res) => {
       };
     }).filter(x => x.score >= 70).sort((a, b) => b.score - a.score);
     results = scored;
+  }
+
+  // 兜底：AI 判定没有任何 ≥70% 的简历，但简历池非空且确实有关键词高命中者时，
+  // 改用关键词粗筛补上，避免明明有相关简历却误报「没有找到匹配度 ≥70% 的简历」。
+  if (engine === 'ai' && results.length === 0) {
+    const all = db.listResumes();
+    const kwScored = all.map(r => {
+      const { score, hits } = llm.keywordMatch(query, (r.content || '') + '\n' + r.summary + '\n' + r.occupation + '\n' + r.experience);
+      return {
+        name: r.name,
+        score,
+        reason: hits.length ? '关键词命中：' + hits.join('、') : '关键词匹配度一般',
+        category: r.category
+      };
+    }).filter(x => x.score >= 70).sort((a, b) => b.score - a.score);
+    if (kwScored.length) {
+      results = kwScored;
+      engine = 'fallback';
+      error = 'AI 判定此岗位无 ≥70% 的简历，已临时用关键词粗筛兜底展示相关候选人，请人工核对。';
+    }
   }
 
   // 关联数据库中的简历详情
@@ -208,18 +267,27 @@ function ringClass(score) {
 }
 
 // ---------------- 简历 ↔ 岗位要求 1v1 精细匹配 ----------------
+const matchProgress = {}; // runId -> { step, ts, done }
 app.post('/api/match-resumes', async (req, res) => {
   const A = req.body.fileA || {};
   const B = req.body.fileB || {};
+  const resumeText = String(req.body.resumeText || '').trim();
   const reqText = String(req.body.requirementText || '').trim();
-  if (!A.data) return res.status(400).json({ error: '请先放入候选人的简历文件' });
+  const multiAgent = !!req.body.multiAgent;
+  const resumeNameFromUI = String(req.body.nameA || '').trim();
+  const runId = String(req.body.runId || ('m' + Date.now()));
+  matchProgress[runId] = { step: '排队中…', ts: Date.now(), done: false };
+  const setProgress = (step) => { if (matchProgress[runId]) { matchProgress[runId].step = step; matchProgress[runId].ts = Date.now(); } };
+  const finishProgress = () => { if (matchProgress[runId]) matchProgress[runId].done = true; };
+  if (!A.data && !resumeText) return res.status(400).json({ error: '请放入候选人的简历文件，或粘贴简历原文' });
   if (!B.data && !reqText) return res.status(400).json({ error: '请放入岗位要求文件，或直接粘贴岗位要求文字' });
 
   let textA, textB;
-  let nameA = A.name || '候选人简历';
+  let nameA = A.name || resumeNameFromUI || '候选人简历';
   let nameB = B.name || '岗位要求';
   try {
-    textA = await parse.parseBuffer(Buffer.from(A.data, 'base64'), A.name || 'resume.pdf');
+    setProgress('正在解析简历文件…');
+    textA = resumeText ? resumeText : await parse.parseBuffer(Buffer.from(A.data, 'base64'), A.name || 'resume.pdf');
     if (B.data) {
       textB = await parse.parseBuffer(Buffer.from(B.data, 'base64'), B.name || 'jd.pdf');
       nameB = B.name || '岗位要求文件';
@@ -228,13 +296,17 @@ app.post('/api/match-resumes', async (req, res) => {
       nameB = '粘贴的岗位要求';
     }
   } catch (e) {
+    finishProgress();
     return res.status(400).json({ error: '文件解析失败：' + e.message });
   }
 
   let out;
   let engine = 'ai';
   try {
-    out = await llm.matchResumeToRequirement(textA, nameA, textB, nameB, db.getUserProfile());
+    out = multiAgent
+      ? await llm.matchResumeToRequirementMultiAgent(textA, nameA, textB, nameB, db.getUserProfile(), setProgress)
+      : (setProgress('AI 匹配分析中…'), await llm.matchResumeToRequirement(textA, nameA, textB, nameB, db.getUserProfile()));
+    setProgress('匹配完成');
   } catch (e) {
     engine = 'fallback';
     const kw = llm.keywordMatch(textB, textA);
@@ -248,13 +320,22 @@ app.post('/api/match-resumes', async (req, res) => {
       usedApi: null,
       model: null
     };
+    setProgress('模型调用失败，已用关键词粗筛兜底');
   }
 
   const convId = db.createConversation(`${nameA} ↔ ${nameB} 匹配度`, 'match');
   db.addMessage(convId, 'user', `简历「${nameA}」与岗位要求「${nameB}」匹配分析`, '');
   db.addMessage(convId, 'assistant', `匹配度 ${out.score}%。${out.summary}`, JSON.stringify({ score: out.score, summary: out.summary, overlap: out.overlap, gap: out.gap, suggestion: out.suggestion }));
 
-  res.json({ score: out.score, summary: out.summary, overlap: out.overlap, gap: out.gap, suggestion: out.suggestion, engine, usedApi: out.apiName ? `${out.apiName} / ${out.model}` : null, names: [nameA, nameB] });
+  finishProgress();
+  res.json({ score: out.score, summary: out.summary, overlap: out.overlap, gap: out.gap, suggestion: out.suggestion, engine, usedApi: (multiAgent ? '多 Agent 协同：' : '') + (out.apiName ? `${out.apiName} / ${out.model}` : ''), names: [nameA, nameB] });
+});
+
+// 匹配进度查询
+app.get('/api/match-progress/:runId', (req, res) => {
+  const p = matchProgress[req.params.runId];
+  if (!p) return res.status(404).json({ error: 'not found' });
+  res.json(p);
 });
 
 // ---------------- 打开文件（默认程序 / WPS） ----------------
@@ -413,6 +494,12 @@ watcher.on('change', (p) => {
     console.log('[watch] 文件变化:', p);
     const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
     processQueue([p], true, multiAgent);
+  }
+});
+watcher.on('unlink', (p) => {
+  if (parse.SUPPORTED.includes(parse.extOf(p))) {
+    console.log('[watch] 文件删除:', p);
+    pool.reconcileDeleted();
   }
 });
 watcher.on('error', (e) => console.error('[watch]', e.message));
