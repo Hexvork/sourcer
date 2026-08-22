@@ -405,6 +405,24 @@ app.put('/api/settings', (req, res) => {
       if (req.body.app.multiAgentSearch != null) db.setAppSetting('multiAgentSearch', req.body.app.multiAgentSearch ? '1' : '0');
       if (req.body.app.multiAgentPool != null) db.setAppSetting('multiAgentPool', req.body.app.multiAgentPool ? '1' : '0');
     }
+    // 配置好 API 后第一件事：补命名已有简历文件为「职位-姓名-出生年份」并同步简历池
+    // （未配 API 入库时跳过重命名；这里拿到 API 立即把欠下的重命名补上）
+    if (db.listAPIs().length > 0) {
+      try {
+        const files = fs.readdirSync(pool.RESUME_DIR)
+          .filter(f => !f.startsWith('~$') && !f.startsWith('.'))
+          .filter(f => parse.SUPPORTED.includes(parse.extOf(f)))
+          .map(f => path.join(pool.RESUME_DIR, f));
+        const plan = planResumeQueue(files);
+        if (plan.toProcess.length) {
+          console.log('[settings] 配置 API 后补命名：需重命名', plan.renameQueued, '份，待处理', plan.pending, '份');
+          const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
+          processQueue(plan.toProcess, plan.renameQueued > 0, multiAgent);
+        }
+      } catch (e) {
+        console.error('[settings-rename]', e.message);
+      }
+    }
     const profile = db.getUserProfile();
     res.json({
       ok: true,
@@ -421,6 +439,47 @@ app.put('/api/settings', (req, res) => {
   }
 });
 
+// 扫描队列规划：
+// - 未处理文件 → 入队处理
+// - needs_ai=1（规则匹配不到姓名/职位/出生日期）→ 配好 API 后入队 force，AI 补全并重命名
+// - 已处理（hash 未变）但文件名不符合「职位-姓名-出生年份」→ 数据齐全直接用 DB 记录改名（不重复调 AI）
+function planResumeQueue(files) {
+  const toProcess = [];
+  let pending = 0, already = 0, renameQueued = 0;
+  // 未配置 API 时不做「AI 补全」的重处理（改了也只会是规则占位数据），等配好 API 后点扫描再补
+  const hasApi = db.listAPIs().length > 0;
+  for (const f of files) {
+    const abs = path.resolve(f);
+    const prev = db.getProcessedFile(abs);
+    let isDone = false;
+    if (prev && prev.status === 'done') {
+      try { isDone = prev.hash === pool.fileHash(abs); } catch (e) { isDone = false; }
+    }
+    if (!isDone) { pending++; toProcess.push(abs); continue; }
+    const row = db.getResumeByPath(abs);
+    if (!row) { already++; continue; }
+    if (row.needs_ai === 1) {
+      // 规则匹配不到的简历：等 AI 补全（配好 API 后重新抽取 → 重命名 → 清除标记）
+      if (hasApi) { renameQueued++; toProcess.push(abs); } else { already++; }
+    } else if (pool.needsRename(abs, row)) {
+      if (pool.entryNameable(row)) {
+        try {
+          const r = pool.renameResumeFile(abs, row, { resumeId: row.id });
+          if (r) console.log('[rename]', r.oldPath, '→', r.newPath);
+        } catch (e) {
+          console.error('[rename] 失败:', abs, e.message);
+          renameQueued++; toProcess.push(abs);
+        }
+      } else {
+        already++;
+      }
+    } else {
+      already++;
+    }
+  }
+  return { toProcess, pending, already, renameQueued };
+}
+
 // ---------------- 手动扫描 ----------------
 app.post('/api/scan', async (req, res) => {
   const force = !!req.body.force;
@@ -431,19 +490,9 @@ app.post('/api/scan', async (req, res) => {
     .filter(f => !f.startsWith('~$') && !f.startsWith('.'))
     .filter(f => parse.SUPPORTED.includes(parse.extOf(f)))
     .map(f => path.join(pool.RESUME_DIR, f));
-  let pending = 0;
-  let already = 0;
-  for (const f of files) {
-    const abs = path.resolve(f);
-    const prev = db.getProcessedFile(abs);
-    let isDone = false;
-    if (prev && prev.status === 'done') {
-      try { isDone = prev.hash === pool.fileHash(abs); } catch (e) { isDone = false; }
-    }
-    if (isDone) already++; else pending++;
-  }
-  res.json({ ok: true, total: files.length, pending, already_processed: already, queued: pending, multiAgent });
-  processQueue(files, force, multiAgent);
+  const plan = planResumeQueue(files);
+  res.json({ ok: true, total: files.length, pending: plan.pending, already_processed: plan.already, queued: plan.toProcess.length, rename_queued: plan.renameQueued, multiAgent });
+  processQueue(plan.toProcess, force || plan.renameQueued > 0, multiAgent);
 });
 
 // ---------------- 启动 ----------------
@@ -463,16 +512,17 @@ app.listen(PORT, () => {
     if (_r.rebuilt) console.log('[启动重建] 已从数据库重建简历池条目', _r.rebuilt, '条');
   } catch (_e) { /* 忽略 */ }
 
-  // 后台扫描启动时已有的简历（不阻塞服务）
+  // 后台扫描启动时已有的简历（不阻塞服务）；已处理但文件名不符合新格式的会直接补命名
   const initialFiles = fs.readdirSync(pool.RESUME_DIR)
     .filter(f => !f.startsWith('~$') && !f.startsWith('.'))
     .filter(f => parse.SUPPORTED.includes(parse.extOf(f)))
     .map(f => path.join(pool.RESUME_DIR, f));
   if (initialFiles.length) {
-    console.log('[启动扫描] 发现', initialFiles.length, '份待处理文件');
+    const plan = planResumeQueue(initialFiles);
+    console.log('[启动扫描] 发现', initialFiles.length, '份文件，待处理', plan.pending, '份，需补命名', plan.renameQueued, '份');
     const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
     if (multiAgent) console.log('[启动扫描] 多 Agent 并发模式已开启');
-    processQueue(initialFiles, false, multiAgent);
+    if (plan.toProcess.length) processQueue(plan.toProcess, plan.renameQueued > 0, multiAgent);
   }
 });
 
