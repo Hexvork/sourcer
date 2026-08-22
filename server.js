@@ -76,6 +76,13 @@ async function processOne(file, force, multiAgent, retried = false) {
         pendingQueue.push({ file: target, force: true, multiAgent, retried: true });
         lastScan.total++;
       }
+    } else if (r.retry) {
+      // 改名失败（EBUSY 等）：10 秒后自动重试，不阻塞其他文件
+      lastScan.errors++;
+      console.log('[延迟重试]', r.finalPath || file);
+      setTimeout(() => {
+        processQueue([r.finalPath || file], true, multiAgent);
+      }, 10000);
     } else if (r.skipped) lastScan.skipped++;
     else lastScan.errors++;
   } catch (e) {
