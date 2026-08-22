@@ -136,6 +136,17 @@ app.post('/api/rename-log/clear', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------------- 问题文件登记表 ----------------
+app.get('/api/problem-files', (req, res) => {
+  res.json({ files: db.listProblemFiles() });
+});
+
+app.post('/api/problem-files/remove', (req, res) => {
+  const p = String(req.body.file_path || '').trim();
+  if (p) db.removeProblemFile(p);
+  res.json({ ok: true });
+});
+
 // ---------------- 简历列表 ----------------
 app.get('/api/resumes', (req, res) => {
   res.json(db.listResumes());
