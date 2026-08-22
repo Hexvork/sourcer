@@ -454,6 +454,22 @@ app.put('/api/settings', (req, res) => {
   }
 });
 
+// 优先级：中括号/明显错误名（杭州、状态等）最优先，未知占位次之，普通补命名最后
+function filePriority(file, row) {
+  let p = 0;
+  const base = path.basename(file);
+  if (/[【】]/.test(base)) p += 100000;
+  if (row) {
+    if (!pool.entryNameable(row)) p += 10000;
+    if (pool.hasUnreliableFields(row)) p += 1000;
+    const n = String(row.name || '');
+    if (/杭州|状态|年龄|性别|本科|硕士|博士|未知|原始简历|技术总监|财务总监|销售总监/.test(n)) p += 5000;
+    const o = String(row.occupation || '');
+    if (/杭州|状态|年龄|性别|本科|硕士|博士|未知|原始简历/.test(o)) p += 3000;
+  }
+  return -p;
+}
+
 // 扫描队列规划：
 // - 未处理文件 → 入队处理
 // - needs_ai=1（规则匹配不到姓名/岗位）→ 配好 API 后入队 force，AI 补全并重命名
@@ -500,6 +516,12 @@ function planResumeQueue(files) {
       already++;
     }
   }
+  // 按优先级排序：先处理中括号/明显错误名，再处理未知占位
+  toProcess.sort((a, b) => {
+    const ra = db.getResumeByPath(a);
+    const rb = db.getResumeByPath(b);
+    return filePriority(a, ra) - filePriority(b, rb);
+  });
   return { toProcess, pending, already, renameQueued };
 }
 
