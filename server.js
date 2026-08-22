@@ -532,6 +532,8 @@ async function planResumeQueue(files) {
     // 历史垃圾名/未知占位：DB 里的岗位/姓名是“期望工作性质：…”这种垃圾，
     // 或任一字段是"未知"，即使 needs_ai 可能不是 1，也要交给 AI 重新抽取补全
     if (!pool.entryNameable(row) || pool.hasUnreliableFields(row)) {
+      // 第一遍：先把不合规的文件名登记进问题表，再进修改队列
+      db.upsertProblemFile(abs, '不符合命名规范/未知/待AI');
       if (hasApi) {
         // 有 AI：直接交给 AI 重新抽取，AI 会同时修正姓名/岗位并清掉【】括号
         renameQueued++; toProcess.push(abs);
