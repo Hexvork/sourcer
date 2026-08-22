@@ -403,10 +403,7 @@ app.put('/api/settings', (req, res) => {
     // （未配 API 入库时跳过重命名；这里拿到 API 立即把欠下的重命名补上）
     if (db.listAPIs().length > 0) {
       try {
-        const files = fs.readdirSync(pool.RESUME_DIR)
-          .filter(f => !f.startsWith('~$') && !f.startsWith('.'))
-          .filter(f => parse.SUPPORTED.includes(parse.extOf(f)))
-          .map(f => path.join(pool.RESUME_DIR, f));
+        const files = pool.listResumeFiles();
         const plan = planResumeQueue(files);
         if (plan.toProcess.length) {
           console.log('[settings] 配置 API 后补命名：需重命名', plan.renameQueued, '份，待处理', plan.pending, '份');
@@ -477,10 +474,7 @@ app.post('/api/scan', async (req, res) => {
   const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
   // 自愈：扫描前先从 DB 重建简历池 markdown，防止数据库有记录但简历池为空
   try { pool.ensurePoolMarkdown(); } catch (_e) { /* 忽略 */ }
-  const files = fs.readdirSync(pool.RESUME_DIR)
-    .filter(f => !f.startsWith('~$') && !f.startsWith('.'))
-    .filter(f => parse.SUPPORTED.includes(parse.extOf(f)))
-    .map(f => path.join(pool.RESUME_DIR, f));
+  const files = pool.listResumeFiles();
   const plan = planResumeQueue(files);
   res.json({ ok: true, total: files.length, pending: plan.pending, already_processed: plan.already, queued: plan.toProcess.length, rename_queued: plan.renameQueued, multiAgent });
   processQueue(plan.toProcess, force || plan.renameQueued > 0, multiAgent);
@@ -504,10 +498,7 @@ app.listen(PORT, () => {
   } catch (_e) { /* 忽略 */ }
 
   // 后台扫描启动时已有的简历（不阻塞服务）；已处理但文件名不符合新格式的会直接补命名
-  const initialFiles = fs.readdirSync(pool.RESUME_DIR)
-    .filter(f => !f.startsWith('~$') && !f.startsWith('.'))
-    .filter(f => parse.SUPPORTED.includes(parse.extOf(f)))
-    .map(f => path.join(pool.RESUME_DIR, f));
+  const initialFiles = pool.listResumeFiles();
   if (initialFiles.length) {
     const plan = planResumeQueue(initialFiles);
     console.log('[启动扫描] 发现', initialFiles.length, '份文件，待处理', plan.pending, '份，需补命名', plan.renameQueued, '份');
