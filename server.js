@@ -120,6 +120,15 @@ app.post('/api/search', async (req, res) => {
   let engine = 'ai';
   let usedApi = null;
   let error = null;
+  const markdown0 = readAllMarkdown();
+
+  // 自愈：若简历池 markdown 为空但数据库里已有记录（例如 markdown 曾被清空），
+  // 从 DB 重建后再搜索，避免「简历池空却提示已同步」「明明有≥70%却搜不到」。
+  if (!markdown0.trim() && db.stats().resumes > 0) {
+    try {
+      pool.ensurePoolMarkdown();
+    } catch (_) { /* 忽略重建失败，走下一步 */ }
+  }
   const markdown = readAllMarkdown();
 
   if (!markdown.trim()) {
@@ -335,6 +344,8 @@ app.put('/api/settings', (req, res) => {
 app.post('/api/scan', async (req, res) => {
   const force = !!req.body.force;
   const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
+  // 自愈：扫描前先从 DB 重建简历池 markdown，防止数据库有记录但简历池为空
+  try { pool.ensurePoolMarkdown(); } catch (_e) { /* 忽略 */ }
   const files = fs.readdirSync(pool.RESUME_DIR)
     .filter(f => !f.startsWith('~$') && !f.startsWith('.'))
     .filter(f => parse.SUPPORTED.includes(parse.extOf(f)))
@@ -364,6 +375,12 @@ app.listen(PORT, () => {
   console.log('  │  简历池:     ' + pool.POOL_DIR);
   console.log('  └──────────────────────────────────────────────┘');
   console.log('');
+
+  // 自愈：启动即从 DB 重建简历池 markdown，防止数据库有记录但简历池为空
+  try {
+    const _r = pool.ensurePoolMarkdown();
+    if (_r.rebuilt) console.log('[启动重建] 已从数据库重建简历池条目', _r.rebuilt, '条');
+  } catch (_e) { /* 忽略 */ }
 
   // 后台扫描启动时已有的简历（不阻塞服务）
   const initialFiles = fs.readdirSync(pool.RESUME_DIR)
