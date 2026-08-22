@@ -512,17 +512,17 @@ app.listen(PORT, () => {
 const watcher = chokidar.watch(pool.RESUME_DIR, {
   ignoreInitial: true,
   awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 200 },
-  ignored: [/^~.*/, /(^|[\\/])\.[^\\/.]/]
+  ignored: (p) => pool.isTempResumeFile(path.basename(p))
 });
 watcher.on('add', (p) => {
-  if (parse.SUPPORTED.includes(parse.extOf(p))) {
+  if (!pool.isTempResumeFile(path.basename(p)) && parse.SUPPORTED.includes(parse.extOf(p))) {
     console.log('[watch] 新文件:', p);
     const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
     processQueue([p], false, multiAgent);
   }
 });
 watcher.on('change', (p) => {
-  if (parse.SUPPORTED.includes(parse.extOf(p))) {
+  if (!pool.isTempResumeFile(path.basename(p)) && parse.SUPPORTED.includes(parse.extOf(p))) {
     console.log('[watch] 文件变化:', p);
     const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
     // 不强制重处理：如果只是重命名触发的 change（hash 没变），跳过；内容真的变了 hash 会变，照样会处理
