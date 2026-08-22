@@ -48,7 +48,7 @@ function now() {
 function processQueue(files, force, multiAgent) {
   const list = Array.isArray(files) ? files : [files];
   for (const f of list) {
-    pendingQueue.push({ file: f, force: !!force, multiAgent: !!multiAgent });
+    pendingQueue.push({ file: f, force: !!force, multiAgent: !!multiAgent, retried: false });
   }
   if (!processing) {
     lastScan.total = pendingQueue.length;
@@ -64,11 +64,19 @@ function processQueue(files, force, multiAgent) {
   }
 }
 
-async function processOne(file, force, multiAgent) {
+async function processOne(file, force, multiAgent, retried = false) {
   try {
     const r = await pool.processFile(file, { force, multiAgent });
-    if (r.ok) lastScan.done++;
-    else if (r.skipped) lastScan.skipped++;
+    if (r.ok) {
+      lastScan.done++;
+      // 第一次出现"未知"：立即再开一个并发任务让 AI 修（只补一次，避免死循环）
+      if (r.needsAI && db.listAPIs().length > 0 && !retried) {
+        const target = r.finalPath || file;
+        console.log('[AI二次补全]', target);
+        pendingQueue.push({ file: target, force: true, multiAgent, retried: true });
+        lastScan.total++;
+      }
+    } else if (r.skipped) lastScan.skipped++;
     else lastScan.errors++;
   } catch (e) {
     lastScan.errors++;
@@ -85,9 +93,9 @@ async function drainQueue() {
     while (pendingQueue.length > 0 || active > 0) {
       // 并发填满 worker
       while (active < CONCURRENCY && pendingQueue.length > 0) {
-        const { file, force, multiAgent } = pendingQueue.shift();
+        const { file, force, multiAgent, retried } = pendingQueue.shift();
         active++;
-        processOne(file, force, multiAgent).finally(() => { active--; });
+        processOne(file, force, multiAgent, retried).finally(() => { active--; });
       }
       if (active > 0) await new Promise(r => setTimeout(r, 150));
     }
@@ -415,7 +423,7 @@ app.get('/api/settings', (req, res) => {
   });
 });
 
-app.put('/api/settings', (req, res) => {
+app.put('/api/settings', async (req, res) => {
   try {
     db.saveUserProfile(req.body.user_name || '', req.body.preference || '');
     db.saveAPIs(req.body.apis || []);
@@ -428,7 +436,7 @@ app.put('/api/settings', (req, res) => {
     if (db.listAPIs().length > 0) {
       try {
         const files = pool.listResumeFiles();
-        const plan = planResumeQueue(files);
+        const plan = await planResumeQueue(files);
         if (plan.toProcess.length) {
           console.log('[settings] 配置 API 后补命名：需重命名', plan.renameQueued, '份，待处理', plan.pending, '份');
           const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
@@ -474,7 +482,7 @@ function filePriority(file, row) {
 // - 未处理文件 → 入队处理
 // - needs_ai=1（规则匹配不到姓名/岗位）→ 配好 API 后入队 force，AI 补全并重命名
 // - 已处理（hash 未变）但文件名不符合「岗位-姓名-出生年份」→ 数据齐全直接用 DB 记录改名（不重复调 AI）
-function planResumeQueue(files) {
+async function planResumeQueue(files) {
   const toProcess = [];
   let pending = 0, already = 0, renameQueued = 0;
   // 未配置 API 时不做「AI 补全」的重处理（改了也只会是规则占位数据），等配好 API 后点扫描再补
@@ -498,7 +506,7 @@ function planResumeQueue(files) {
       } else {
         // 无 AI：只做格式兜底清理（去【】），等以后配了 AI 再补全
         try {
-          const r = pool.renameResumeFile(abs, row, { resumeId: row.id });
+          const r = await pool.renameResumeFile(abs, row, { resumeId: row.id });
           if (r) {
             console.log('[rename] 格式兜底', r.oldPath, '→', r.newPath);
             already++;
@@ -511,7 +519,7 @@ function planResumeQueue(files) {
       }
     } else if (pool.needsRename(abs, row)) {
       try {
-        const r = pool.renameResumeFile(abs, row, { resumeId: row.id });
+        const r = await pool.renameResumeFile(abs, row, { resumeId: row.id });
         if (r) console.log('[rename]', r.oldPath, '→', r.newPath);
       } catch (e) {
         console.error('[rename] 失败:', abs, e.message);
@@ -531,12 +539,12 @@ function planResumeQueue(files) {
 }
 
 // ---------------- 自动复查：配置了 AI 就持续把有问题的文件重新送入队列 ----------------
-function autoRequeue() {
+async function autoRequeue() {
   try {
     if (processing) return;
     if (db.listAPIs().length === 0) return; // 没有 AI 时不用反复空转
     const files = pool.listResumeFiles();
-    const plan = planResumeQueue(files);
+    const plan = await planResumeQueue(files);
     if (plan.toProcess.length) {
       console.log('[自动复查] 发现', plan.toProcess.length, '份待 AI 补全/待修正，重新入队');
       const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
@@ -554,13 +562,13 @@ app.post('/api/scan', async (req, res) => {
   // 自愈：扫描前先从 DB 重建简历池 markdown，防止数据库有记录但简历池为空
   try { pool.ensurePoolMarkdown(); } catch (_e) { /* 忽略 */ }
   const files = pool.listResumeFiles();
-  const plan = planResumeQueue(files);
+  const plan = await planResumeQueue(files);
   res.json({ ok: true, total: files.length, pending: plan.pending, already_processed: plan.already, queued: plan.toProcess.length, rename_queued: plan.renameQueued, multiAgent });
   processQueue(plan.toProcess, force || plan.renameQueued > 0, multiAgent);
 });
 
 // ---------------- 启动 ----------------
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log('');
   console.log('  ┌──────────────────────────────────────────────┐');
   console.log('  │  猎头简历搜寻系统已启动                        │');
@@ -579,7 +587,7 @@ app.listen(PORT, () => {
   // 后台扫描启动时已有的简历（不阻塞服务）；已处理但文件名不符合新格式的会直接补命名
   const initialFiles = pool.listResumeFiles();
   if (initialFiles.length) {
-    const plan = planResumeQueue(initialFiles);
+    const plan = await planResumeQueue(initialFiles);
     console.log('[启动扫描] 发现', initialFiles.length, '份文件，待处理', plan.pending, '份，需补命名', plan.renameQueued, '份');
     const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
     if (multiAgent) console.log('[启动扫描] 多 Agent 并发模式已开启');
@@ -587,7 +595,7 @@ app.listen(PORT, () => {
   }
 
   // 每 60 秒自动复查一次：已处理但有问题的文件（含"未知"、杭州类错误名）持续送 AI 修正
-  setInterval(autoRequeue, 60000);
+  setInterval(() => { autoRequeue().catch(e => console.error('[自动复查]', e.message)); }, 60000);
 });
 
 // 实时监测简历文件夹
