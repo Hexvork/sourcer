@@ -27,6 +27,7 @@ try { pool.reconcileDeleted(); } catch (e) { console.error('[reconcile@boot]', e
 let processing = false;
 let pendingQueue = [];
 let lastScan = { time: null, total: 0, done: 0, errors: 0, running: false };
+const CONCURRENCY = 5; // 同时处理多少个文件（AI 调用是 I/O 等待，并发能明显提速）
 
 function readAllMarkdown() {
   const files = fs.readdirSync(pool.POOL_DIR)
@@ -57,6 +58,21 @@ function processQueue(files, force, multiAgent) {
     lastScan.time = now();
     lastScan.multiAgent = !!multiAgent;
     drainQueue();
+  } else {
+    // 已在处理中：只增加总数，不打断当前 drain
+    lastScan.total += list.length;
+  }
+}
+
+async function processOne(file, force, multiAgent) {
+  try {
+    const r = await pool.processFile(file, { force, multiAgent });
+    if (r.ok) lastScan.done++;
+    else if (r.skipped) lastScan.skipped++;
+    else lastScan.errors++;
+  } catch (e) {
+    lastScan.errors++;
+    console.error('[scan]', file, e.message);
   }
 }
 
@@ -65,17 +81,15 @@ async function drainQueue() {
   processing = true;
   lastScan.running = true;
   try {
-    while (pendingQueue.length) {
-      const { file, force, multiAgent } = pendingQueue.shift();
-      try {
-        const r = await pool.processFile(file, { force, multiAgent });
-        if (r.ok) lastScan.done++;
-        else if (r.skipped) lastScan.skipped++;
-        else lastScan.errors++;
-      } catch (e) {
-        lastScan.errors++;
-        console.error('[scan]', file, e.message);
+    let active = 0;
+    while (pendingQueue.length > 0 || active > 0) {
+      // 并发填满 worker
+      while (active < CONCURRENCY && pendingQueue.length > 0) {
+        const { file, force, multiAgent } = pendingQueue.shift();
+        active++;
+        processOne(file, force, multiAgent).finally(() => { active--; });
       }
+      if (active > 0) await new Promise(r => setTimeout(r, 150));
     }
   } finally {
     processing = false;
@@ -489,6 +503,23 @@ function planResumeQueue(files) {
   return { toProcess, pending, already, renameQueued };
 }
 
+// ---------------- 自动复查：配置了 AI 就持续把有问题的文件重新送入队列 ----------------
+function autoRequeue() {
+  try {
+    if (processing) return;
+    if (db.listAPIs().length === 0) return; // 没有 AI 时不用反复空转
+    const files = pool.listResumeFiles();
+    const plan = planResumeQueue(files);
+    if (plan.toProcess.length) {
+      console.log('[自动复查] 发现', plan.toProcess.length, '份待 AI 补全/待修正，重新入队');
+      const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
+      processQueue(plan.toProcess, plan.renameQueued > 0, multiAgent);
+    }
+  } catch (e) {
+    console.error('[自动复查]', e.message);
+  }
+}
+
 // ---------------- 手动扫描 ----------------
 app.post('/api/scan', async (req, res) => {
   const force = !!req.body.force;
@@ -527,6 +558,9 @@ app.listen(PORT, () => {
     if (multiAgent) console.log('[启动扫描] 多 Agent 并发模式已开启');
     if (plan.toProcess.length) processQueue(plan.toProcess, plan.renameQueued > 0, multiAgent);
   }
+
+  // 每 60 秒自动复查一次：已处理但有问题的文件（含"未知"、杭州类错误名）持续送 AI 修正
+  setInterval(autoRequeue, 60000);
 });
 
 // 实时监测简历文件夹
