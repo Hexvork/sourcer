@@ -66,6 +66,7 @@ function switchPage(page) {
   $('#page-' + page).classList.add('active');
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.page === page));
   if (page === 'history') loadHistory();
+  if (page === 'rename') refreshRenameLog();
 }
 
 // ---------------- 设置面板 ----------------
@@ -524,6 +525,36 @@ function renderMiniCards(results) {
     </div>`).join('')}</div>`;
 }
 
+// ---------------- 文件名修改日志 ----------------
+async function refreshRenameLog() {
+  const list = $('#renameList');
+  try {
+    const data = await api('/api/rename-log');
+    const entries = data.entries || [];
+    const ok = entries.filter(e => e.status === 'renamed').length;
+    const failed = entries.filter(e => e.status === 'failed').length;
+    $('#renameStats').innerHTML = `
+      <div class="rename-stat"><div class="stat-icon ok">${ic('check')}</div><div><div class="stat-num">${ok}</div><div class="stat-label">已修改</div></div></div>
+      <div class="rename-stat"><div class="stat-icon err">${ic('xmark')}</div><div><div class="stat-num">${failed}</div><div class="stat-label">失败</div></div></div>
+      <div class="rename-stat"><div class="stat-icon info">${ic('clock')}</div><div><div class="stat-num">${entries.length}</div><div class="stat-label">最近记录</div></div></div>`;
+    if (!entries.length) {
+      list.innerHTML = `<div class="rename-empty">${ic('file-signature')} 还没有文件改名记录。扫描或放入简历后会自动显示。</div>`;
+      return;
+    }
+    list.innerHTML = entries.map(e => `
+      <div class="rename-item">
+        <span class="r-status ${esc(e.status)}">${e.status === 'renamed' ? '已修改' : e.status === 'failed' ? '失败' : '处理中'}</span>
+        <div class="r-body">
+          <div class="r-path">${esc(e.oldPath || '')} <span class="r-arrow">→</span> <b>${esc(e.newPath || '')}</b></div>
+          ${e.error ? `<div class="r-error">${esc(e.error)}</div>` : ''}
+        </div>
+        <span class="r-time">${esc(e.time || '')}</span>
+      </div>`).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="rename-empty">${ic('circle-xmark')} ${esc(e.message)}</div>`;
+  }
+}
+
 // ---------------- 初始化 ----------------
 async function init() {
   $$('.nav-btn').forEach(btn => btn.addEventListener('click', () => switchPage(btn.dataset.page)));
@@ -545,9 +576,20 @@ async function init() {
   bindDropZone($('#dropB'), $('#inputB'), $('#fileB'), 'B');
   $('#btnMatch').addEventListener('click', doMatch);
 
+  $('#btnClearRenameLog').addEventListener('click', async () => {
+    try {
+      await api('/api/rename-log/clear', { method: 'POST' });
+      refreshRenameLog();
+      toast('改名日志已清空', 'ok');
+    } catch (e) {
+      toast(esc(e.message), 'error');
+    }
+  });
+
   await loadSettings();
   refreshState();
   setInterval(refreshState, 5000);
+  setInterval(() => { if (currentPage === 'rename') refreshRenameLog(); }, 2000);
 }
 
 document.addEventListener('DOMContentLoaded', init);

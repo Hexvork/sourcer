@@ -17,6 +17,7 @@
     <div class="header-right">
       <button class="nav-btn active" data-page="search"><i class="fas fa-magnifying-glass"></i> 简历搜寻</button>
       <button class="nav-btn" data-page="match"><i class="fas fa-code-compare"></i> 简历匹配度</button>
+      <button class="nav-btn" data-page="rename"><i class="fas fa-file-signature"></i> 文件名修改</button>
       <button class="nav-btn" data-page="history"><i class="fas fa-clock-rotate-left"></i> 历史</button>
       <button class="nav-btn" data-page="settings"><i class="fas fa-gear"></i> 设置</button>
     </div>
@@ -104,6 +105,19 @@
           <div class="match-suggestion" id="matchSuggestion"></div>
         </div>
       </div>
+    </section>
+
+    <!-- 文件名修改页 -->
+    <section id="page-rename" class="page">
+      <div class="rename-header">
+        <h2><i class="fas fa-file-signature"></i> 文件名修改</h2>
+        <p>实时查看简历文件自动重命名的进度、成功与失败记录。</p>
+      </div>
+      <div class="rename-stats" id="renameStats"></div>
+      <div class="rename-toolbar">
+        <button class="btn btn-outline btn-sm" id="btnClearRenameLog"><i class="fas fa-broom"></i> 清空日志</button>
+      </div>
+      <div id="renameList" class="rename-list"></div>
     </section>
 
     <!-- 历史页 -->

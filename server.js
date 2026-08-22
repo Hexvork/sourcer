@@ -92,6 +92,16 @@ app.get('/api/state', (req, res) => {
   res.json({ ...s, lastScan, port: PORT });
 });
 
+// ---------------- 文件名修改日志 ----------------
+app.get('/api/rename-log', (req, res) => {
+  res.json({ entries: pool.getRenameLog() });
+});
+
+app.post('/api/rename-log/clear', (req, res) => {
+  pool.clearRenameLog();
+  res.json({ ok: true });
+});
+
 // ---------------- 简历列表 ----------------
 app.get('/api/resumes', (req, res) => {
   res.json(db.listResumes());
