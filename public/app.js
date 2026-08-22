@@ -66,7 +66,7 @@ function switchPage(page) {
   $('#page-' + page).classList.add('active');
   $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.page === page));
   if (page === 'history') loadHistory();
-  if (page === 'rename') refreshRenameLog();
+  if (page === 'rename') { refreshRenameLog(); refreshAuditState(); }
 }
 
 // ---------------- 设置面板 ----------------
@@ -557,6 +557,77 @@ async function refreshRenameLog() {
   }
 }
 
+// ---------------- 文件名修改：两步流程 ----------------
+async function refreshAuditState() {
+  try {
+    const s = await api('/api/audit');
+    if (s.done) {
+      $('#step1Card').classList.add('done');
+      $('#btnRenameStart').disabled = false;
+      $('#renameStatus').textContent = '步骤 1 已完成，可以开始重命名';
+      $('#auditStatus').textContent = `上次扫描：共 ${s.total} 份，发现 ${s.problems} 个问题`;
+      $('#auditProgressBar').style.width = '100%';
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function startAudit() {
+  const btn = $('#btnAudit');
+  btn.disabled = true;
+  $('#step1Card').classList.remove('done');
+  $('#step1Card').classList.add('active');
+  $('#auditStatus').textContent = '扫描中…';
+  $('#auditProgressBar').style.width = '0%';
+  $('#btnRenameStart').disabled = true;
+  $('#renameStatus').textContent = '等待步骤 1 完成';
+  try {
+    await api('/api/audit', { method: 'POST' });
+    await new Promise((resolve) => {
+      const timer = setInterval(async () => {
+        try {
+          const s = await api('/api/audit');
+          const pct = s.total ? Math.round(s.processed / s.total * 100) : 0;
+          $('#auditProgressBar').style.width = pct + '%';
+          $('#auditStatus').textContent = `已扫描 ${s.processed}/${s.total}，发现 ${s.problems} 个问题`;
+          if (!s.running && s.done) {
+            clearInterval(timer);
+            $('#step1Card').classList.remove('active');
+            $('#step1Card').classList.add('done');
+            $('#btnAudit').disabled = false;
+            $('#btnAudit').innerHTML = '<i class="fas fa-rotate"></i> 重新扫描';
+            $('#btnRenameStart').disabled = false;
+            $('#renameStatus').textContent = '步骤 1 完成，可以开始重命名';
+            resolve();
+          }
+        } catch (e) {
+          clearInterval(timer);
+          $('#auditStatus').textContent = `${ic('circle-xmark')} ${esc(e.message)}`;
+          $('#btnAudit').disabled = false;
+          resolve();
+        }
+      }, 500);
+    });
+  } catch (e) {
+    $('#auditStatus').textContent = `${ic('circle-xmark')} ${esc(e.message)}`;
+    $('#btnAudit').disabled = false;
+    $('#step1Card').classList.remove('active');
+  }
+}
+
+async function startRename() {
+  $('#btnRenameStart').disabled = true;
+  $('#renameStatus').textContent = '重命名进行中…';
+  try {
+    const r = await api('/api/rename-start', { method: 'POST' });
+    $('#renameStatus').textContent = `已入队 ${r.queued} 份，开始处理…`;
+    toast(`已入队 ${r.queued} 份`, 'ok');
+    refreshRenameLog();
+  } catch (e) {
+    $('#renameStatus').textContent = `${ic('circle-xmark')} ${esc(e.message)}`;
+    $('#btnRenameStart').disabled = false;
+  }
+}
+
 // ---------------- 初始化 ----------------
 async function init() {
   $$('.nav-btn').forEach(btn => btn.addEventListener('click', () => switchPage(btn.dataset.page)));
@@ -587,6 +658,9 @@ async function init() {
       toast(esc(e.message), 'error');
     }
   });
+
+  $('#btnAudit').addEventListener('click', startAudit);
+  $('#btnRenameStart').addEventListener('click', startRename);
 
   await loadSettings();
   refreshState();

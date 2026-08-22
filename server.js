@@ -27,6 +27,7 @@ try { pool.reconcileDeleted(); } catch (e) { console.error('[reconcile@boot]', e
 let processing = false;
 let pendingQueue = [];
 let lastScan = { time: null, total: 0, done: 0, errors: 0, running: false };
+let auditState = { running: false, total: 0, processed: 0, problems: 0, done: false };
 const DEFAULT_CONCURRENCY = 2; // 默认并发数（可在设置里调 1~10）
 
 function readAllMarkdown() {
@@ -145,6 +146,49 @@ app.post('/api/problem-files/remove', (req, res) => {
   const p = String(req.body.file_path || '').trim();
   if (p) db.removeProblemFile(p);
   res.json({ ok: true });
+});
+
+// ---------------- 两步流程：先扫描登记，再重命名 ----------------
+app.post('/api/audit', async (req, res) => {
+  if (auditState.running) return res.json({ ok: false, error: '扫描正在进行中' });
+  auditState = { running: true, total: 0, processed: 0, problems: 0, done: false };
+  res.json({ ok: true });
+  try {
+    const files = pool.listResumeFiles();
+    auditState.total = files.length;
+    for (const f of files) {
+      const abs = path.resolve(f);
+      const base = path.basename(abs, path.extname(abs));
+      const row = db.getResumeByPath(abs);
+      const looksBad = /[【】]/.test(base)
+        || base.includes('未知')
+        || /杭州|状态|年龄|性别|本科|硕士|博士|原始简历/.test(base)
+        || base.split('-').filter(Boolean).length !== 3;
+      if (row) {
+        if (!pool.entryNameable(row) || pool.hasUnreliableFields(row)) {
+          db.upsertProblemFile(abs, '不符合命名规范/未知/待AI');
+          auditState.problems++;
+        }
+      } else if (looksBad) {
+        db.upsertProblemFile(abs, '文件名不符合规范');
+        auditState.problems++;
+      }
+      auditState.processed++;
+    }
+  } finally {
+    auditState.running = false;
+    auditState.done = true;
+  }
+});
+
+app.get('/api/audit', (req, res) => res.json(auditState));
+
+app.post('/api/rename-start', async (req, res) => {
+  const files = pool.listResumeFiles();
+  const plan = await planResumeQueue(files);
+  const multiAgent = db.getAppSetting('multiAgentPool', '1') === '1';
+  processQueue(plan.toProcess, plan.renameQueued > 0, multiAgent);
+  res.json({ ok: true, queued: plan.toProcess.length, renameQueued: plan.renameQueued });
 });
 
 // ---------------- 简历列表 ----------------

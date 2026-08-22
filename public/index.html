@@ -111,8 +111,26 @@
     <section id="page-rename" class="page">
       <div class="rename-header">
         <h2><i class="fas fa-file-signature"></i> 文件名修改</h2>
-        <p>实时查看简历文件自动重命名的进度、成功与失败记录。</p>
+        <p>先扫描不合规文件名，再开始重命名。两步独立进行。</p>
       </div>
+
+      <div class="rename-steps">
+        <div class="step-card" id="step1Card">
+          <div class="step-title"><span class="step-num">1</span> 扫描不合规文件名</div>
+          <div class="step-desc">检查所有简历文件名，把不符合「岗位-姓名-出生年份」的登记到问题表。</div>
+          <button class="btn btn-primary" id="btnAudit"><i class="fas fa-magnifying-glass"></i> 开始扫描</button>
+          <div class="progress"><div class="progress-bar" id="auditProgressBar"></div></div>
+          <div class="step-status" id="auditStatus">等待扫描</div>
+        </div>
+
+        <div class="step-card" id="step2Card">
+          <div class="step-title"><span class="step-num">2</span> 重命名 / 修改</div>
+          <div class="step-desc">对问题表中的文件执行 AI 补全和重命名，完成后自动销号。</div>
+          <button class="btn btn-primary" id="btnRenameStart" disabled><i class="fas fa-wand-magic-sparkles"></i> 开始重命名</button>
+          <div class="step-status" id="renameStatus">等待步骤 1 完成</div>
+        </div>
+      </div>
+
       <div class="rename-stats" id="renameStats"></div>
       <div class="rename-toolbar">
         <button class="btn btn-outline btn-sm" id="btnClearRenameLog"><i class="fas fa-broom"></i> 清空日志</button>
