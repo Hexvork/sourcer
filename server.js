@@ -25,6 +25,7 @@ try { pool.reconcileDeleted(); } catch (e) { console.error('[reconcile@boot]', e
 
 // ---------------- 工具函数 ----------------
 let processing = false;
+let pendingQueue = [];
 let lastScan = { time: null, total: 0, done: 0, errors: 0, running: false };
 
 function readAllMarkdown() {
@@ -43,44 +44,37 @@ function now() {
   return new Date().toLocaleString('zh-CN', { hour12: false });
 }
 
-async function processQueue(files, force, multiAgent) {
+function processQueue(files, force, multiAgent) {
+  const list = Array.isArray(files) ? files : [files];
+  for (const f of list) {
+    pendingQueue.push({ file: f, force: !!force, multiAgent: !!multiAgent });
+  }
+  if (!processing) {
+    lastScan.total = pendingQueue.length;
+    lastScan.done = 0;
+    lastScan.errors = 0;
+    lastScan.skipped = 0;
+    lastScan.time = now();
+    lastScan.multiAgent = !!multiAgent;
+    drainQueue();
+  }
+}
+
+async function drainQueue() {
   if (processing) return;
   processing = true;
   lastScan.running = true;
-  lastScan.total = files.length;
-  lastScan.done = 0;
-  lastScan.errors = 0;
-  lastScan.skipped = 0;
-  lastScan.time = now();
-  lastScan.multiAgent = !!multiAgent;
   try {
-    if (multiAgent) {
-      // 多 Agent 并发模式：每个文件由一个 Agent 处理，并发运行
-      const promises = files.map(async (f) => {
-        try {
-          const r = await pool.processFile(f, { force, multiAgent: true });
-          return r;
-        } catch (e) {
-          return { ok: false, error: e.message };
-        }
-      });
-      const results = await Promise.all(promises);
-      for (const r of results) {
+    while (pendingQueue.length) {
+      const { file, force, multiAgent } = pendingQueue.shift();
+      try {
+        const r = await pool.processFile(file, { force, multiAgent });
         if (r.ok) lastScan.done++;
         else if (r.skipped) lastScan.skipped++;
         else lastScan.errors++;
-      }
-    } else {
-      for (const f of files) {
-        try {
-          const r = await pool.processFile(f, { force, multiAgent: false });
-          if (r.ok) lastScan.done++;
-          else if (r.skipped) lastScan.skipped++;
-          else lastScan.errors++;
-        } catch (e) {
-          lastScan.errors++;
-          console.error('[scan]', f, e.message);
-        }
+      } catch (e) {
+        lastScan.errors++;
+        console.error('[scan]', file, e.message);
       }
     }
   } finally {
@@ -405,7 +399,7 @@ app.put('/api/settings', (req, res) => {
       if (req.body.app.multiAgentSearch != null) db.setAppSetting('multiAgentSearch', req.body.app.multiAgentSearch ? '1' : '0');
       if (req.body.app.multiAgentPool != null) db.setAppSetting('multiAgentPool', req.body.app.multiAgentPool ? '1' : '0');
     }
-    // 配置好 API 后第一件事：补命名已有简历文件为「姓名-出生年份」并同步简历池
+    // 配置好 API 后第一件事：补命名已有简历文件为「岗位-姓名-出生年份」并同步简历池
     // （未配 API 入库时跳过重命名；这里拿到 API 立即把欠下的重命名补上）
     if (db.listAPIs().length > 0) {
       try {
@@ -441,8 +435,8 @@ app.put('/api/settings', (req, res) => {
 
 // 扫描队列规划：
 // - 未处理文件 → 入队处理
-// - needs_ai=1（规则匹配不到姓名）→ 配好 API 后入队 force，AI 补全并重命名
-// - 已处理（hash 未变）但文件名不符合「姓名-出生年份」→ 数据齐全直接用 DB 记录改名（不重复调 AI）
+// - needs_ai=1（规则匹配不到姓名/岗位）→ 配好 API 后入队 force，AI 补全并重命名
+// - 已处理（hash 未变）但文件名不符合「岗位-姓名-出生年份」→ 数据齐全直接用 DB 记录改名（不重复调 AI）
 function planResumeQueue(files) {
   const toProcess = [];
   let pending = 0, already = 0, renameQueued = 0;
