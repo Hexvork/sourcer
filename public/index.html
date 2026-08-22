@@ -184,6 +184,10 @@
               <span class="toggle-hint">开启后，每份简历由独立 Agent 并行处理，加快处理速度</span>
             </label>
           </div>
+          <div class="api-row">
+            <label>文件处理并发数（同时调 AI 的文件数量，建议 2~3，太大容易被 API 限流封号）</label>
+            <input type="number" id="concurrencyInput" class="text-input" min="1" max="10" value="2">
+          </div>
         </div>
       </div>
     </section>

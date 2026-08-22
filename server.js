@@ -27,7 +27,7 @@ try { pool.reconcileDeleted(); } catch (e) { console.error('[reconcile@boot]', e
 let processing = false;
 let pendingQueue = [];
 let lastScan = { time: null, total: 0, done: 0, errors: 0, running: false };
-const CONCURRENCY = 5; // 同时处理多少个文件（AI 调用是 I/O 等待，并发能明显提速）
+const DEFAULT_CONCURRENCY = 2; // 默认并发数（可在设置里调 1~10）
 
 function readAllMarkdown() {
   const files = fs.readdirSync(pool.POOL_DIR)
@@ -100,10 +100,11 @@ async function drainQueue() {
   processing = true;
   lastScan.running = true;
   try {
+    const concurrency = Math.max(1, Math.min(10, parseInt(db.getAppSetting('concurrency', String(DEFAULT_CONCURRENCY)), 10) || DEFAULT_CONCURRENCY));
     let active = 0;
     while (pendingQueue.length > 0 || active > 0) {
       // 并发填满 worker
-      while (active < CONCURRENCY && pendingQueue.length > 0) {
+      while (active < concurrency && pendingQueue.length > 0) {
         const { file, force, multiAgent, retried, renameRetries } = pendingQueue.shift();
         active++;
         processOne(file, force, multiAgent, retried, renameRetries).finally(() => { active--; });
@@ -429,7 +430,8 @@ app.get('/api/settings', (req, res) => {
     apis: db.listAPIs(),
     app: {
       multiAgentSearch: db.getAppSetting('multiAgentSearch', '0'),
-      multiAgentPool: db.getAppSetting('multiAgentPool', '1')
+      multiAgentPool: db.getAppSetting('multiAgentPool', '1'),
+      concurrency: db.getAppSetting('concurrency', String(DEFAULT_CONCURRENCY))
     }
   });
 });
@@ -441,6 +443,10 @@ app.put('/api/settings', async (req, res) => {
     if (req.body.app) {
       if (req.body.app.multiAgentSearch != null) db.setAppSetting('multiAgentSearch', req.body.app.multiAgentSearch ? '1' : '0');
       if (req.body.app.multiAgentPool != null) db.setAppSetting('multiAgentPool', req.body.app.multiAgentPool ? '1' : '0');
+      if (req.body.app.concurrency != null) {
+        const c = Math.max(1, Math.min(10, parseInt(req.body.app.concurrency, 10) || DEFAULT_CONCURRENCY));
+        db.setAppSetting('concurrency', String(c));
+      }
     }
     // 配置好 API 后第一件事：补命名已有简历文件为「岗位-姓名-出生年份」并同步简历池
     // （未配 API 入库时跳过重命名；这里拿到 API 立即把欠下的重命名补上）

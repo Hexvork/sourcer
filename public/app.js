@@ -166,6 +166,7 @@ async function loadSettings() {
     if ($('#multiAgentSearchToggle')) $('#multiAgentSearchToggle').checked = searchMulti;
     if ($('#multiAgentToggle')) $('#multiAgentToggle').checked = searchMulti;
     if ($('#multiAgentPoolToggle')) $('#multiAgentPoolToggle').checked = app.multiAgentPool === '1';
+    if ($('#concurrencyInput')) $('#concurrencyInput').value = app.concurrency || 2;
   } catch (e) {
     apis = [];
   }
@@ -192,7 +193,8 @@ async function saveSettings() {
         apis,
         app: {
           multiAgentSearch: $('#multiAgentSearchToggle') ? $('#multiAgentSearchToggle').checked : true,
-          multiAgentPool: $('#multiAgentPoolToggle') ? $('#multiAgentPoolToggle').checked : true
+          multiAgentPool: $('#multiAgentPoolToggle') ? $('#multiAgentPoolToggle').checked : true,
+          concurrency: parseInt($('#concurrencyInput').value, 10) || 2
         }
       }
     });
