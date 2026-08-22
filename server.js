@@ -452,20 +452,17 @@ function planResumeQueue(files) {
     if (!isDone) { pending++; toProcess.push(abs); continue; }
     const row = db.getResumeByPath(abs);
     if (!row) { already++; continue; }
-    if (row.needs_ai === 1) {
-      // 规则匹配不到的简历：等 AI 补全（配好 API 后重新抽取 → 重命名 → 清除标记）
+    // 历史垃圾名：DB 里的岗位/姓名是“期望工作性质：…”这种垃圾，虽然 needs_ai 可能不是 1，
+    // 但只要现在拼不出可靠文件名，就交给 AI 重新抽取补全
+    if (!pool.entryNameable(row)) {
       if (hasApi) { renameQueued++; toProcess.push(abs); } else { already++; }
     } else if (pool.needsRename(abs, row)) {
-      if (pool.entryNameable(row)) {
-        try {
-          const r = pool.renameResumeFile(abs, row, { resumeId: row.id });
-          if (r) console.log('[rename]', r.oldPath, '→', r.newPath);
-        } catch (e) {
-          console.error('[rename] 失败:', abs, e.message);
-          renameQueued++; toProcess.push(abs);
-        }
-      } else {
-        already++;
+      try {
+        const r = pool.renameResumeFile(abs, row, { resumeId: row.id });
+        if (r) console.log('[rename]', r.oldPath, '→', r.newPath);
+      } catch (e) {
+        console.error('[rename] 失败:', abs, e.message);
+        renameQueued++; toProcess.push(abs);
       }
     } else {
       already++;
