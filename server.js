@@ -45,10 +45,10 @@ function now() {
   return new Date().toLocaleString('zh-CN', { hour12: false });
 }
 
-function processQueue(files, force, multiAgent) {
+function processQueue(files, force, multiAgent, renameRetries = 0) {
   const list = Array.isArray(files) ? files : [files];
   for (const f of list) {
-    pendingQueue.push({ file: f, force: !!force, multiAgent: !!multiAgent, retried: false });
+    pendingQueue.push({ file: f, force: !!force, multiAgent: !!multiAgent, retried: false, renameRetries });
   }
   if (!processing) {
     lastScan.total = pendingQueue.length;
@@ -64,7 +64,7 @@ function processQueue(files, force, multiAgent) {
   }
 }
 
-async function processOne(file, force, multiAgent, retried = false) {
+async function processOne(file, force, multiAgent, retried = false, renameRetries = 0) {
   try {
     const r = await pool.processFile(file, { force, multiAgent });
     if (r.ok) {
@@ -73,16 +73,20 @@ async function processOne(file, force, multiAgent, retried = false) {
       if (r.needsAI && db.listAPIs().length > 0 && !retried) {
         const target = r.finalPath || file;
         console.log('[AI二次补全]', target);
-        pendingQueue.push({ file: target, force: true, multiAgent, retried: true });
+        pendingQueue.push({ file: target, force: true, multiAgent, retried: true, renameRetries: 0 });
         lastScan.total++;
       }
     } else if (r.retry) {
-      // 改名失败（EBUSY 等）：1 秒后立即自动重试，不阻塞其他文件
+      // 改名失败（EBUSY 等）：最多立即重试 3 次，之后交给 60 秒自动复查，避免死磕一个文件
       lastScan.errors++;
-      console.log('[立即重试]', r.finalPath || file);
-      setTimeout(() => {
-        processQueue([r.finalPath || file], true, multiAgent);
-      }, 1000);
+      if (renameRetries < 3) {
+        console.log('[立即重试]', r.finalPath || file, `(${renameRetries + 1}/3)`);
+        setTimeout(() => {
+          processQueue([r.finalPath || file], true, multiAgent, renameRetries + 1);
+        }, 1000);
+      } else {
+        console.log('[重试上限]', r.finalPath || file, '交给自动复查');
+      }
     } else if (r.skipped) lastScan.skipped++;
     else lastScan.errors++;
   } catch (e) {
@@ -100,9 +104,9 @@ async function drainQueue() {
     while (pendingQueue.length > 0 || active > 0) {
       // 并发填满 worker
       while (active < CONCURRENCY && pendingQueue.length > 0) {
-        const { file, force, multiAgent, retried } = pendingQueue.shift();
+        const { file, force, multiAgent, retried, renameRetries } = pendingQueue.shift();
         active++;
-        processOne(file, force, multiAgent, retried).finally(() => { active--; });
+        processOne(file, force, multiAgent, retried, renameRetries).finally(() => { active--; });
       }
       if (active > 0) await new Promise(r => setTimeout(r, 150));
     }
