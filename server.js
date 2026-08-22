@@ -405,7 +405,7 @@ app.put('/api/settings', (req, res) => {
       if (req.body.app.multiAgentSearch != null) db.setAppSetting('multiAgentSearch', req.body.app.multiAgentSearch ? '1' : '0');
       if (req.body.app.multiAgentPool != null) db.setAppSetting('multiAgentPool', req.body.app.multiAgentPool ? '1' : '0');
     }
-    // 配置好 API 后第一件事：补命名已有简历文件为「职位-姓名-出生年份」并同步简历池
+    // 配置好 API 后第一件事：补命名已有简历文件为「姓名-出生年份」并同步简历池
     // （未配 API 入库时跳过重命名；这里拿到 API 立即把欠下的重命名补上）
     if (db.listAPIs().length > 0) {
       try {
@@ -441,8 +441,8 @@ app.put('/api/settings', (req, res) => {
 
 // 扫描队列规划：
 // - 未处理文件 → 入队处理
-// - needs_ai=1（规则匹配不到姓名/职位/出生日期）→ 配好 API 后入队 force，AI 补全并重命名
-// - 已处理（hash 未变）但文件名不符合「职位-姓名-出生年份」→ 数据齐全直接用 DB 记录改名（不重复调 AI）
+// - needs_ai=1（规则匹配不到姓名）→ 配好 API 后入队 force，AI 补全并重命名
+// - 已处理（hash 未变）但文件名不符合「姓名-出生年份」→ 数据齐全直接用 DB 记录改名（不重复调 AI）
 function planResumeQueue(files) {
   const toProcess = [];
   let pending = 0, already = 0, renameQueued = 0;
